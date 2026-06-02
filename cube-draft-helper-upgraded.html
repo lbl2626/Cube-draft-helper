@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cube Draft Helper</title>
+  <style>
+    :root {
+      --bg: #f6f7fb;
+      --card: #ffffff;
+      --text: #111827;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+      --primary: #111827;
+      --secondary: #4b5563;
+      --danger: #991b1b;
+      --good: #166534;
+      --warn-bg: #fff7ed;
+      --warn-border: #fed7aa;
+      --warn-text: #9a3412;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 20px;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    h1 { margin-bottom: 4px; font-size: 30px; }
+    h2 { margin-top: 0; font-size: 21px; }
+    h3 { margin-bottom: 8px; }
+
+    .sub {
+      color: var(--muted);
+      margin-top: 0;
+      line-height: 1.4;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 18px;
+      margin: 16px 0;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.04);
+    }
+
+    input, select, button {
+      font-size: 16px;
+      padding: 11px 12px;
+      margin: 5px 4px 5px 0;
+      border-radius: 10px;
+      border: 1px solid #d1d5db;
+    }
+
+    input {
+      width: 100%;
+      max-width: 280px;
+      background: white;
+    }
+
+    select { background: white; max-width: 100%; }
+
+    button {
+      cursor: pointer;
+      background: var(--primary);
+      color: white;
+      border: none;
+      font-weight: 600;
+    }
+
+    button.secondary { background: var(--secondary); }
+    button.danger { background: var(--danger); }
+    button.good { background: var(--good); }
+
+    button:disabled {
+      background: #9ca3af;
+      cursor: not-allowed;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 8px 12px;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 10px;
+    }
+
+    .match {
+      padding: 12px 0;
+      border-bottom: 1px solid #eee;
+    }
+
+    .match:last-child { border-bottom: none; }
+
+    .small {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.35;
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin-top: 8px;
+      font-size: 15px;
+    }
+
+    th, td {
+      text-align: left;
+      padding: 9px 7px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+
+    th { background: #f9fafb; }
+
+    .warning {
+      background: var(--warn-bg);
+      border: 1px solid var(--warn-border);
+      color: var(--warn-text);
+      padding: 10px;
+      border-radius: 10px;
+      margin-top: 10px;
+      line-height: 1.35;
+    }
+
+    .success {
+      background: #f0fdf4;
+      border: 1px solid #bbf7d0;
+      color: #166534;
+      padding: 10px;
+      border-radius: 10px;
+      margin-top: 10px;
+      line-height: 1.35;
+    }
+
+    .pill {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: #eef2ff;
+      color: #3730a3;
+      font-size: 13px;
+      font-weight: 600;
+      margin-left: 6px;
+    }
+
+    .copyBox {
+      white-space: pre-wrap;
+      background: #f9fafb;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+      margin-top: 8px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 13px;
+      color: #374151;
+    }
+
+    @media (max-width: 520px) {
+      body { padding: 14px; }
+      h1 { font-size: 26px; }
+      .card { padding: 14px; }
+      button { width: 100%; margin-right: 0; }
+      input { max-width: none; }
+      .actions { display: block; }
+      table { font-size: 14px; }
+      th, td { padding: 8px 5px; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Cube Draft Helper</h1>
+  <p class="sub">Simple 6/8-player Cube night helper: seating, three rounds, Swiss-style pairings, and no rematches if possible.</p>
+
+  <div class="card">
+    <h2>1. Players</h2>
+    <p class="small">Choose 6 or 8 players, enter names, then start the draft.</p>
+    <div class="actions">
+      <button onclick="setPlayerCount(6)" class="secondary">6 players</button>
+      <button onclick="setPlayerCount(8)" class="secondary">8 players</button>
+    </div>
+    <div id="playerInputs" class="grid"></div>
+    <div class="actions">
+      <button onclick="startDraft()" class="good">Start Draft</button>
+      <button onclick="resetAll()" class="danger">Reset</button>
+    </div>
+    <div id="playerWarning"></div>
+  </div>
+
+  <div class="card" id="seatingCard" style="display:none;">
+    <h2>2. Seating</h2>
+    <div class="actions">
+      <button onclick="generateSeating()">Generate Seating</button>
+      <button onclick="copySeating()" class="secondary">Copy Seating</button>
+    </div>
+    <ol id="seatingList"></ol>
+    <div id="seatingCopy"></div>
+  </div>
+
+  <div class="card" id="roundCard" style="display:none;">
+    <h2>3. Rounds</h2>
+    <p class="small">Enter all winners before generating the next round.</p>
+    <div class="actions">
+      <button id="roundButton" onclick="generateNextRound()">Generate Round 1</button>
+      <button onclick="copyCurrentRound()" class="secondary">Copy Current Pairings</button>
+    </div>
+    <div id="roundNotice"></div>
+    <div id="rounds"></div>
+  </div>
+
+  <div class="card" id="standingsCard" style="display:none;">
+    <h2>Standings</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Player</th>
+          <th>Record</th>
+          <th>Opponents</th>
+        </tr>
+      </thead>
+      <tbody id="standingsBody"></tbody>
+    </table>
+  </div>
+
+<script>
+let playerCount = 8;
+let players = [];
+let seating = [];
+let rounds = [];
+let currentRound = 0;
+
+function setPlayerCount(n) {
+  playerCount = n;
+  renderPlayerInputs();
+}
+
+function renderPlayerInputs() {
+  const container = document.getElementById("playerInputs");
+  container.innerHTML = "";
+  for (let i = 0; i < playerCount; i++) {
+    const input = document.createElement("input");
+    input.placeholder = "Player " + (i + 1);
+    input.id = "player-" + i;
+    input.autocomplete = "off";
+    container.appendChild(input);
+  }
+}
+
+function shuffle(array) {
+  const arr = [...array];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function startDraft() {
+  const names = [];
+  for (let i = 0; i < playerCount; i++) {
+    const name = document.getElementById("player-" + i).value.trim();
+    if (!name) {
+      warn("playerWarning", "Please fill all player names.");
+      return;
+    }
+    names.push(name);
+  }
+
+  const uniqueNames = new Set(names.map(n => n.toLowerCase()));
+  if (uniqueNames.size !== names.length) {
+    warn("playerWarning", "Player names must be unique.");
+    return;
+  }
+
+  players = names.map((name, index) => ({
+    id: "p" + index,
+    name,
+    wins: 0,
+    losses: 0,
+    opponents: []
+  }));
+
+  seating = [];
+  rounds = [];
+  currentRound = 0;
+
+  document.getElementById("playerWarning").innerHTML = "";
+  document.getElementById("seatingCard").style.display = "block";
+  document.getElementById("roundCard").style.display = "block";
+  document.getElementById("standingsCard").style.display = "block";
+  document.getElementById("rounds").innerHTML = "";
+  document.getElementById("roundNotice").innerHTML = "";
+  document.getElementById("seatingList").innerHTML = "";
+  document.getElementById("seatingCopy").innerHTML = "";
+  document.getElementById("roundButton").disabled = false;
+  document.getElementById("roundButton").textContent = "Generate Round 1";
+  updateStandings();
+}
+
+function generateSeating() {
+  seating = shuffle(players);
+  const list = document.getElementById("seatingList");
+  list.innerHTML = "";
+  seating.forEach(p => {
+    const li = document.createElement("li");
+    li.textContent = p.name;
+    list.appendChild(li);
+  });
+  document.getElementById("seatingCopy").innerHTML = "";
+}
+
+function copyText(text, targetId) {
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text);
+    success(targetId, "Copied.");
+  } else {
+    const box = document.createElement("textarea");
+    box.value = text;
+    document.body.appendChild(box);
+    box.select();
+    document.execCommand("copy");
+    document.body.removeChild(box);
+    success(targetId, "Copied.");
+  }
+}
+
+function copySeating() {
+  if (!seating.length) {
+    warn("seatingCopy", "Generate seating first.");
+    return;
+  }
+  const text = "Cube Draft Seating\n" + seating.map((p, i) => `${i + 1}. ${p.name}`).join("\n");
+  copyText(text, "seatingCopy");
+}
+
+function recordKey(p) {
+  return p.wins + "-" + p.losses;
+}
+
+function havePlayed(a, b) {
+  return a.opponents.includes(b.id);
+}
+
+function pairListNoRematches(list) {
+  if (list.length % 2 !== 0) return null;
+
+  function backtrack(remaining, pairs) {
+    if (remaining.length === 0) return pairs;
+
+    const first = remaining[0];
+    const candidates = shuffle(remaining.slice(1)).filter(p => !havePlayed(first, p));
+
+    for (const candidate of candidates) {
+      const nextRemaining = remaining.filter(p => p.id !== first.id && p.id !== candidate.id);
+      const result = backtrack(nextRemaining, [...pairs, [first, candidate]]);
+      if (result) return result;
+    }
+
+    return null;
+  }
+
+  return backtrack(shuffle(list), []);
+}
+
+function pairListAllowRematches(list) {
+  const shuffled = shuffle(list);
+  const pairings = [];
+  for (let i = 0; i < shuffled.length; i += 2) {
+    if (shuffled[i + 1]) pairings.push([shuffled[i], shuffled[i + 1]]);
+  }
+  return pairings;
+}
+
+function generatePairings() {
+  if (currentRound === 0) {
+    return pairListAllowRematches(players);
+  }
+
+  const groups = {};
+  players.forEach(p => {
+    const key = recordKey(p);
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(p);
+  });
+
+  const orderedKeys = Object.keys(groups).sort((a, b) => {
+    const [aw, al] = a.split("-").map(Number);
+    const [bw, bl] = b.split("-").map(Number);
+    if (bw !== aw) return bw - aw;
+    return al - bl;
+  });
+
+  let pairings = [];
+  let rematchWarning = false;
+
+  for (const key of orderedKeys) {
+    const group = groups[key];
+    let groupPairs = pairListNoRematches(group);
+    if (!groupPairs) {
+      groupPairs = pairListAllowRematches(group);
+      rematchWarning = true;
+    }
+    pairings = pairings.concat(groupPairs);
+  }
+
+  return { pairings, rematchWarning };
+}
+
+function allResultsEntered() {
+  if (currentRound === 0) return true;
+  const lastRound = rounds[currentRound - 1];
+  return lastRound.matches.every(m => m.winner);
+}
+
+function generateNextRound() {
+  if (currentRound >= 3) return;
+
+  if (!allResultsEntered()) {
+    alert("Enter all results before generating the next round.");
+    return;
+  }
+
+  if (currentRound > 0) applyResults(rounds[currentRound - 1]);
+
+  currentRound++;
+  const generated = generatePairings();
+  const pairings = Array.isArray(generated) ? generated : generated.pairings;
+  const rematchWarning = Array.isArray(generated) ? false : generated.rematchWarning;
+
+  const matches = pairings.map(([a, b], index) => ({
+    id: "r" + currentRound + "m" + index,
+    playerA: a.id,
+    playerB: b.id,
+    winner: null,
+    applied: false
+  }));
+
+  rounds.push({ round: currentRound, matches });
+  renderRounds();
+
+  if (rematchWarning) {
+    warn("roundNotice", "No-rematch pairing was impossible in at least one record group, so the app used a fallback pairing.");
+  } else {
+    document.getElementById("roundNotice").innerHTML = "";
+  }
+
+  if (currentRound < 3) {
+    document.getElementById("roundButton").textContent = "Generate Round " + (currentRound + 1);
+  } else {
+    document.getElementById("roundButton").textContent = "Finish Draft";
+  }
+
+  updateStandings();
+}
+
+function applyResults(round) {
+  round.matches.forEach(match => {
+    if (match.applied) return;
+    if (!match.winner) return;
+
+    const a = players.find(p => p.id === match.playerA);
+    const b = players.find(p => p.id === match.playerB);
+    const winner = players.find(p => p.id === match.winner);
+    const loser = winner.id === a.id ? b : a;
+
+    winner.wins++;
+    loser.losses++;
+
+    if (!a.opponents.includes(b.id)) a.opponents.push(b.id);
+    if (!b.opponents.includes(a.id)) b.opponents.push(a.id);
+
+    match.applied = true;
+  });
+}
+
+function finishIfNeeded() {
+  if (currentRound === 3 && allResultsEntered()) {
+    applyResults(rounds[2]);
+    document.getElementById("roundButton").disabled = true;
+    document.getElementById("roundButton").textContent = "Draft Finished";
+    updateStandings();
+  }
+}
+
+function renderRounds() {
+  const container = document.getElementById("rounds");
+  container.innerHTML = "";
+
+  rounds.forEach(round => {
+    const div = document.createElement("div");
+    div.className = "card";
+    div.innerHTML = `<h2>Round ${round.round}<span class="pill">${roundLabel(round.round)}</span></h2>`;
+
+    round.matches.forEach((match, idx) => {
+      const a = players.find(p => p.id === match.playerA);
+      const b = players.find(p => p.id === match.playerB);
+      const rematch = a.opponents.includes(b.id);
+
+      const matchDiv = document.createElement("div");
+      matchDiv.className = "match";
+
+      const selectDisabled = round.round !== currentRound || match.applied ? "disabled" : "";
+      const rematchText = rematch && !match.applied ? ' <span class="small">(rematch)</span>' : "";
+
+      matchDiv.innerHTML = `
+        <strong>Match ${idx + 1}:</strong> ${a.name} vs ${b.name}${rematchText}
+        <br>
+        <span class="small">Current records before this round: ${a.wins}-${a.losses} vs ${b.wins}-${b.losses}</span>
+        <br>
+        Winner:
+        <select ${selectDisabled} onchange="setWinner('${match.id}', this.value)">
+          <option value="">Select winner</option>
+          <option value="${a.id}" ${match.winner === a.id ? "selected" : ""}>${a.name}</option>
+          <option value="${b.id}" ${match.winner === b.id ? "selected" : ""}>${b.name}</option>
+        </select>
+      `;
+      div.appendChild(matchDiv);
+    });
+
+    container.appendChild(div);
+  });
+}
+
+function roundLabel(round) {
+  if (round === 1) return "random";
+  if (round === 2) return "winners/losers";
+  return "final Swiss";
+}
+
+function setWinner(matchId, winnerId) {
+  for (const round of rounds) {
+    const match = round.matches.find(m => m.id === matchId);
+    if (match) {
+      match.winner = winnerId;
+      break;
+    }
+  }
+  finishIfNeeded();
+}
+
+function copyCurrentRound() {
+  if (!rounds.length) {
+    warn("roundNotice", "Generate a round first.");
+    return;
+  }
+
+  const round = rounds[rounds.length - 1];
+  const lines = [`Cube Draft - Round ${round.round} Pairings`];
+
+  round.matches.forEach((m, i) => {
+    const a = players.find(p => p.id === m.playerA);
+    const b = players.find(p => p.id === m.playerB);
+    lines.push(`${i + 1}. ${a.name} vs ${b.name}`);
+  });
+
+  copyText(lines.join("\n"), "roundNotice");
+}
+
+function updateStandings() {
+  const body = document.getElementById("standingsBody");
+  body.innerHTML = "";
+
+  const sorted = [...players].sort((a, b) => {
+    if (b.wins !== a.wins) return b.wins - a.wins;
+    if (a.losses !== b.losses) return a.losses - b.losses;
+    return a.name.localeCompare(b.name);
+  });
+
+  sorted.forEach(p => {
+    const opponentNames = p.opponents.map(id => players.find(x => x.id === id)?.name).filter(Boolean).join(", ");
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${p.name}</td>
+      <td>${p.wins}-${p.losses}</td>
+      <td>${opponentNames || "-"}</td>
+    `;
+    body.appendChild(tr);
+  });
+}
+
+function resetAll() {
+  players = [];
+  seating = [];
+  rounds = [];
+  currentRound = 0;
+  document.getElementById("seatingCard").style.display = "none";
+  document.getElementById("roundCard").style.display = "none";
+  document.getElementById("standingsCard").style.display = "none";
+  document.getElementById("playerWarning").innerHTML = "";
+  document.getElementById("roundNotice").innerHTML = "";
+  renderPlayerInputs();
+}
+
+function warn(id, message) {
+  document.getElementById(id).innerHTML = `<div class="warning">${message}</div>`;
+}
+
+function success(id, message) {
+  document.getElementById(id).innerHTML = `<div class="success">${message}</div>`;
+}
+
+renderPlayerInputs();
+</script>
+</body>
+</html>
