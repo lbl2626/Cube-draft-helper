@@ -37,8 +37,8 @@
     <div id="playerWarning"></div>
   </div>
 
-  <div class="card" id="seatingCard" style="display:none;"><h2>2. Seating</h2><div class="actions"><button onclick="generateSeating()">Generate Seating</button><button onclick="copySeating()" class="secondary">Copy Seating</button></div><ol id="seatingList"></ol><div id="seatingCopy"></div></div>
-  <div class="card" id="roundCard" style="display:none;"><h2>3. Current Round</h2><p class="small">Tap winners as matches finish. You can generate early pairings before every match is done.</p><div id="roundNotice"></div><div id="currentRoundView"></div><div class="stickyAction"><button id="roundButton" onclick="generateNextRound()">Generate Round 1</button><button onclick="copyCurrentRound()" class="secondary">Copy Current Pairings</button></div><details id="previousRoundsDetails" style="display:none;"><summary>Previous rounds</summary><div id="previousRoundsView"></div></details></div>
+  <div class="card" id="seatingCard" style="display:none;"><h2>2. Seating</h2><div class="actions"><button onclick="generateSeating()">Generate Seating</button></div><ol id="seatingList"></ol><div id="seatingCopy"></div></div>
+  <div class="card" id="roundCard" style="display:none;"><h2>3. Current Round</h2><p class="small">Tap winners as matches finish. You can generate early pairings before every match is done.</p><div id="roundNotice"></div><div id="currentRoundView"></div><div class="stickyAction"><button id="roundButton" onclick="generateNextRound()">Generate Round 1</button></div><details id="previousRoundsDetails" style="display:none;"><summary>Previous rounds</summary><div id="previousRoundsView"></div></details></div>
   
 <div class="card" id="wagerCard" style="display:none;">
   <h2>4. Wagers & Settlements</h2>
@@ -58,7 +58,7 @@
   <div class="wagerControls">
     <div class="moneyInput"><label>Player A</label><select id="wagerPlayerA"></select></div>
     <div class="moneyInput"><label>Player B</label><select id="wagerPlayerB"></select></div>
-    <div class="moneyInput"><label>Amount</label><input id="wagerAmount" type="number" value="500" min="0" step="100"></div>
+    <div class="moneyInput"><label>Amount</label><input id="wagerAmount" type="number" value="1000" min="0" step="100"></div>
     <button onclick="addSideWager()" class="secondary">Add</button>
   </div>
   <div id="sideWagers"><p class="small">No side wagers yet.</p></div>
@@ -72,7 +72,7 @@
 <div class="card" id="standingsCard" style="display:none;"><h2>Standings</h2><table><thead><tr><th>Player</th><th>Record</th><th>Opponents</th></tr></thead><tbody id="standingsBody"></tbody></table></div>
 
 <script>
-const DEFAULT_REGULARS=["Bertík","Flochy","René","Zubař","KK","Batrs","Stráča","Slávek","Vít Vávra","Vítek","Buky"];
+const DEFAULT_REGULARS=["Bertík","Flochy","René","Zubař","KK","Batrs","Stráča","Slávek","Vít Vávra","Vítek Říman","Buky"];
 let draftSize=8,regulars=[],selectedRegulars=[],guests=[],players=[],seating=[],rounds=[],currentRound=0;sideWagers=[];
 function loadRegulars(){const saved=localStorage.getItem("cubeDraftRegulars");if(saved){regulars=JSON.parse(saved)}else{regulars=[...DEFAULT_REGULARS];localStorage.setItem("cubeDraftRegulars",JSON.stringify(regulars))}}
 function setDraftSize(n){draftSize=n;document.getElementById("size6").classList.toggle("active",n===6);document.getElementById("size8").classList.toggle("active",n===8);while(selectedRegulars.length+guests.length>draftSize){if(guests.length>0)guests.pop();else selectedRegulars.pop()}renderSetup()}
