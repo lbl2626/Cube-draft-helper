@@ -55,9 +55,13 @@
 
   <h3 style="margin-top:16px;">Side wagers</h3>
   <p class="small">Winner is whoever has the better final record. Same record = wager is void.</p>
+  <div class="sizeToggle" style="margin-top:8px;">
+    <button id="wagerMode1v1" class="sizeBtn active" onclick="setWagerMode('1v1')">1v1</button>
+    <button id="wagerModeAll" class="sizeBtn" onclick="setWagerMode('all')">Player vs All</button>
+  </div>
   <div class="wagerControls">
-    <div class="moneyInput"><label>Player A</label><select id="wagerPlayerA"></select></div>
-    <div class="moneyInput"><label>Player B</label><select id="wagerPlayerB"></select></div>
+    <div class="moneyInput"><label id="wagerPlayerALabel">Player A</label><select id="wagerPlayerA"></select></div>
+    <div class="moneyInput" id="wagerPlayerBWrap"><label>Player B</label><select id="wagerPlayerB"></select></div>
     <div class="moneyInput"><label>Amount</label><input id="wagerAmount" type="number" value="1000" min="0" step="100"></div>
     <button onclick="addSideWager()" class="secondary">Add</button>
   </div>
@@ -74,7 +78,7 @@
 <script>
 const DEFAULT_REGULARS=["Bertík","Flochy","René","Zubař","KK","Batrs","Stráča","Slávek","Vít Vávra","Vítek Říman","Buky"];
 let draftSize=8,regulars=[],selectedRegulars=[],guests=[],players=[],seating=[],rounds=[],currentRound=0;sideWagers=[];
-function loadRegulars(){const saved=localStorage.getItem("cubeDraftRegulars");if(saved){regulars=JSON.parse(saved)}else{regulars=[...DEFAULT_REGULARS];localStorage.setItem("cubeDraftRegulars",JSON.stringify(regulars))}}
+function loadRegulars(){const saved=localStorage.getItem("cubeDraftRegulars");if(saved){regulars=JSON.parse(saved);regulars=regulars.map(n=>n==="Vítek"?"Vítek Říman":n);localStorage.setItem("cubeDraftRegulars",JSON.stringify(regulars))}else{regulars=[...DEFAULT_REGULARS];localStorage.setItem("cubeDraftRegulars",JSON.stringify(regulars))}}
 function setDraftSize(n){draftSize=n;document.getElementById("size6").classList.toggle("active",n===6);document.getElementById("size8").classList.toggle("active",n===8);while(selectedRegulars.length+guests.length>draftSize){if(guests.length>0)guests.pop();else selectedRegulars.pop()}renderSetup()}
 function renderSetup(){const rc=document.getElementById("regularPlayers");rc.innerHTML="";regulars.forEach(name=>{const selected=selectedRegulars.includes(name);const btn=document.createElement("button");btn.className="playerChip"+(selected?" selected":"");btn.onclick=()=>toggleRegular(name);btn.innerHTML=`<span>${name}</span><span class="check">${selected?"✓":""}</span>`;rc.appendChild(btn)});const gl=document.getElementById("guestList");gl.innerHTML="";guests.forEach((name,index)=>{const div=document.createElement("div");div.className="guestItem";div.innerHTML=`<strong>${name}</strong><button class="danger miniBtn" onclick="removeGuest(${index})">Remove</button>`;gl.appendChild(div)});const count=selectedRegulars.length+guests.length;document.getElementById("selectionStatus").textContent=`Selected: ${count}/${draftSize}`;document.getElementById("startButton").disabled=count!==draftSize}
 function toggleRegular(name){const count=selectedRegulars.length+guests.length;if(selectedRegulars.includes(name)){selectedRegulars=selectedRegulars.filter(n=>n!==name)}else{if(count>=draftSize){warn("playerWarning",`You already selected ${draftSize} players. Remove someone first.`);return}selectedRegulars.push(name)}document.getElementById("playerWarning").innerHTML="";renderSetup()}
@@ -115,10 +119,56 @@ function updateStandings(){const body=document.getElementById("standingsBody");b
 function moneyValue(id){const v=Number(document.getElementById(id)?.value||0);return Number.isFinite(v)?v:0}
 function isDraftFinished(){return currentRound===3&&rounds[2]&&rounds[2].matches.every(m=>m.applied)}
 function getPayoutForRecord(p){const k=p.wins+"-"+p.losses;if(k==="3-0")return moneyValue("payout30");if(k==="2-1")return moneyValue("payout21");if(k==="1-2")return moneyValue("payout12");if(k==="0-3")return moneyValue("payout03");return 0}
-function renderWagerPlayerOptions(){const a=document.getElementById("wagerPlayerA"),b=document.getElementById("wagerPlayerB");if(!a||!b)return;a.innerHTML="";b.innerHTML="";players.forEach(p=>{const oa=document.createElement("option");oa.value=p.id;oa.textContent=p.name;a.appendChild(oa);const ob=document.createElement("option");ob.value=p.id;ob.textContent=p.name;b.appendChild(ob)});if(players.length>1)b.selectedIndex=1}
-function addSideWager(){const a=document.getElementById("wagerPlayerA").value,b=document.getElementById("wagerPlayerB").value,amount=Number(document.getElementById("wagerAmount").value||0);if(!a||!b||a===b){warn("settlementCopy","Choose two different players.");return}if(!amount||amount<=0){warn("settlementCopy","Enter a positive wager amount.");return}sideWagers.push({id:"w"+Date.now()+Math.floor(Math.random()*100000),playerA:a,playerB:b,amount});document.getElementById("settlementCopy").innerHTML="";renderSideWagers();updateSettlementPreview()}
+function renderWagerPlayerOptions(){const a=document.getElementById("wagerPlayerA"),b=document.getElementById("wagerPlayerB");if(!a||!b)return;a.innerHTML="";b.innerHTML="";players.forEach(p=>{const oa=document.createElement("option");oa.value=p.id;oa.textContent=p.name;a.appendChild(oa);const ob=document.createElement("option");ob.value=p.id;ob.textContent=p.name;b.appendChild(ob)});if(players.length>1)b.selectedIndex=1;setWagerMode(wagerMode)}
+
+function setWagerMode(mode){
+  wagerMode=mode;
+  const one=document.getElementById("wagerMode1v1"),all=document.getElementById("wagerModeAll");
+  const bwrap=document.getElementById("wagerPlayerBWrap"),alabel=document.getElementById("wagerPlayerALabel");
+  if(one)one.classList.toggle("active",mode==="1v1");
+  if(all)all.classList.toggle("active",mode==="all");
+  if(bwrap)bwrap.style.display=mode==="all"?"none":"block";
+  if(alabel)alabel.textContent=mode==="all"?"Player":"Player A";
+}
+
+function addSideWager(){
+  const a=document.getElementById("wagerPlayerA").value;
+  const amount=Number(document.getElementById("wagerAmount").value||0);
+  if(!a){warn("settlementCopy","Choose a player.");return}
+  if(!amount||amount<=0){warn("settlementCopy","Enter a positive wager amount.");return}
+
+  if(wagerMode==="all"){
+    const opponents=players.filter(p=>p.id!==a);
+    if(!opponents.length){warn("settlementCopy","No opponents available.");return}
+    opponents.forEach(p=>{
+      sideWagers.push({
+        id:"w"+Date.now()+Math.floor(Math.random()*100000),
+        playerA:a,
+        playerB:p.id,
+        amount,
+        group:"all"
+      });
+    });
+    document.getElementById("settlementCopy").innerHTML="";
+    renderSideWagers();
+    updateSettlementPreview();
+    return;
+  }
+
+  const b=document.getElementById("wagerPlayerB").value;
+  if(!b||a===b){warn("settlementCopy","Choose two different players.");return}
+  sideWagers.push({
+    id:"w"+Date.now()+Math.floor(Math.random()*100000),
+    playerA:a,
+    playerB:b,
+    amount
+  });
+  document.getElementById("settlementCopy").innerHTML="";
+  renderSideWagers();
+  updateSettlementPreview();
+}
 function removeSideWager(id){sideWagers=sideWagers.filter(w=>w.id!==id);renderSideWagers();updateSettlementPreview()}
-function renderSideWagers(){const c=document.getElementById("sideWagers");if(!c)return;c.innerHTML="";if(!sideWagers.length){c.innerHTML='<p class="small">No side wagers yet.</p>';return}sideWagers.forEach(w=>{const a=players.find(p=>p.id===w.playerA),b=players.find(p=>p.id===w.playerB);if(!a||!b)return;const d=document.createElement("div");d.className="wagerRow";d.innerHTML=`<strong>${a.name}</strong> vs <strong>${b.name}</strong> <span class="pill">${w.amount} CZK</span><button class="danger miniBtn" style="float:right;" onclick="removeSideWager('${w.id}')">Remove</button><div style="clear:both;"></div>`;c.appendChild(d)})}
+function renderSideWagers(){const c=document.getElementById("sideWagers");if(!c)return;c.innerHTML="";if(!sideWagers.length){c.innerHTML='<p class="small">No side wagers yet.</p>';return}sideWagers.forEach(w=>{const a=players.find(p=>p.id===w.playerA),b=players.find(p=>p.id===w.playerB);if(!a||!b)return;const d=document.createElement("div");d.className="wagerRow";d.innerHTML=`<strong>${a.name}</strong> vs <strong>${b.name}</strong> <span class="pill">${w.amount} CZK</span>${w.group==="all"?' <span class="pill">vs all</span>':''}<button class="danger miniBtn" style="float:right;" onclick="removeSideWager('${w.id}')">Remove</button><div style="clear:both;"></div>`;c.appendChild(d)})}
 function compareFinalRecord(a,b){if(a.wins!==b.wins)return a.wins>b.wins?1:-1;if(a.losses!==b.losses)return a.losses<b.losses?1:-1;return 0}
 function calculateSettlements(){const entry=moneyValue("entryFee"),finished=isDraftFinished(),balances={},prizeLines=[],wagerLines=[];players.forEach(p=>{const payout=finished?getPayoutForRecord(p):0;balances[p.id]=payout-entry;prizeLines.push({player:p.name,record:p.wins+"-"+p.losses,entry,payout,net:balances[p.id]})});if(finished){sideWagers.forEach(w=>{const a=players.find(p=>p.id===w.playerA),b=players.find(p=>p.id===w.playerB);if(!a||!b)return;const cmp=compareFinalRecord(a,b);if(cmp===0){wagerLines.push(`${a.name} vs ${b.name}: void, same record`);return}const winner=cmp>0?a:b,loser=cmp>0?b:a;balances[winner.id]+=w.amount;balances[loser.id]-=w.amount;wagerLines.push(`${winner.name} wins ${w.amount} CZK from ${loser.name}`)})}return{balances,prizeLines,wagerLines,draftFinished:finished}}
 function updateSettlementPreview(){const c=document.getElementById("settlementPreview");if(!c)return;renderSideWagers();if(!players.length){c.innerHTML="Start draft to calculate settlements.";return}const r=calculateSettlements(),entry=moneyValue("entryFee"),pool=players.length*entry,total=r.draftFinished?r.prizeLines.reduce((s,l)=>s+l.payout,0):0;let out=`<div class="settlementLine"><span>Entry pool</span><strong>${pool} CZK</strong></div><div class="settlementLine"><span>Prize payouts ${r.draftFinished?"":"(after draft ends)"}</span><strong>${total} CZK</strong></div>`;if(!r.draftFinished){out+=`<div class="warning">Final settlement appears after Round 3 is finished. Current view only shows setup and entry pool.</div>`}else{[...players].sort((a,b)=>r.balances[b.id]-r.balances[a.id]).forEach(p=>{const net=r.balances[p.id],cls=net>=0?"positive":"negative",sign=net>0?"+":"";out+=`<div class="settlementLine"><span>${p.name} <span class="small">${p.wins}-${p.losses}</span></span><span class="${cls}">${sign}${net} CZK</span></div>`});if(r.wagerLines.length){out+=`<h3 style="margin-top:14px;">Side wager results</h3>`;r.wagerLines.forEach(line=>out+=`<div class="settlementLine"><span>${line}</span></div>`)}}c.innerHTML=out}
