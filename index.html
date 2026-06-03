@@ -10,7 +10,7 @@
 </head>
 <body>
   <h1>Cube Draft Helper</h1>
-  <p class="sub">Select players, generate seating, play three Swiss-style rounds, and generate safe no-rematch early pairings while slow matches finish.</p>
+  <p class="sub">Select players, generate seating, play three Swiss-style rounds, and track friendly CZK settlements.</p>
 
   <div class="card" id="setupCard">
     <h2>1. Select Players</h2>
@@ -27,6 +27,36 @@
 
   <div class="card" id="seatingCard" style="display:none;"><h2>2. Seating</h2><div class="actions"><button onclick="generateSeating()">Generate Seating</button><button onclick="copySeating()" class="secondary">Copy Seating</button></div><ol id="seatingList"></ol><div id="seatingCopy"></div></div>
   <div class="card" id="roundCard" style="display:none;"><h2>3. Current Round</h2><p class="small">Tap winners as matches finish. You can generate early pairings before every match is done.</p><div id="roundNotice"></div><div id="currentRoundView"></div><div class="stickyAction"><button id="roundButton" onclick="generateNextRound()">Generate Round 1</button><button onclick="copyCurrentRound()" class="secondary">Copy Current Pairings</button></div><details id="previousRoundsDetails" style="display:none;"><summary>Previous rounds</summary><div id="previousRoundsView"></div></details></div>
+
+  <div class="card" id="wagerCard" style="display:none;">
+    <h2>4. Wagers & Settlements</h2>
+    <p class="small">Friendly settlement tracker. Default 8-player model: 1000 CZK entry, 3-0 gets 4000, each 2-1 gets 1000 back.</p>
+
+    <h3>Prize model</h3>
+    <div class="moneyGrid">
+      <div class="moneyInput"><label>Entry fee</label><input id="entryFee" type="number" value="1000" min="0" step="100" oninput="updateSettlementPreview()" /></div>
+      <div class="moneyInput"><label>3-0 payout</label><input id="payout30" type="number" value="4000" min="0" step="100" oninput="updateSettlementPreview()" /></div>
+      <div class="moneyInput"><label>2-1 payout</label><input id="payout21" type="number" value="1000" min="0" step="100" oninput="updateSettlementPreview()" /></div>
+      <div class="moneyInput"><label>1-2 payout</label><input id="payout12" type="number" value="0" min="0" step="100" oninput="updateSettlementPreview()" /></div>
+      <div class="moneyInput"><label>0-3 payout</label><input id="payout03" type="number" value="0" min="0" step="100" oninput="updateSettlementPreview()" /></div>
+    </div>
+
+    <h3 style="margin-top:16px;">Side wagers</h3>
+    <p class="small">Winner is whoever has the better final record. Same record = wager is void.</p>
+    <div class="wagerControls">
+      <div class="moneyInput"><label>Player A</label><select id="wagerPlayerA"></select></div>
+      <div class="moneyInput"><label>Player B</label><select id="wagerPlayerB"></select></div>
+      <div class="moneyInput"><label>Amount</label><input id="wagerAmount" type="number" value="500" min="0" step="100" /></div>
+      <button onclick="addSideWager()" class="secondary">Add</button>
+    </div>
+    <div id="sideWagers"><p class="small">No side wagers yet.</p></div>
+
+    <h3 style="margin-top:16px;">Settlement preview</h3>
+    <div id="settlementPreview" class="small">Start draft to calculate settlements.</div>
+    <div class="actions"><button onclick="copySettlements()" class="secondary">Copy Settlements</button></div>
+    <div id="settlementCopy"></div>
+  </div>
+
   <div class="card" id="standingsCard" style="display:none;"><h2>Standings</h2><table><thead><tr><th>Player</th><th>Record</th><th>Opponents</th></tr></thead><tbody id="standingsBody"></tbody></table></div>
 
 <script>
