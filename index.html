@@ -102,8 +102,11 @@ function applyResults(round){round.matches.forEach(match=>{if(match.applied||!ma
 
 function scrollToSettlementsSoon(){
   setTimeout(()=>{
-    const target=document.getElementById("settlementPreview")||document.getElementById("wagerCard")||document.getElementById("standingsCard");
-    if(target)target.scrollIntoView({behavior:"smooth",block:"start"});
+    const target=document.getElementById("wagerCard")||document.getElementById("settlementPreview")||document.getElementById("standingsCard");
+    if(target){
+      target.scrollIntoView({behavior:"smooth",block:"start"});
+      setTimeout(()=>window.scrollBy(0,-80),50);
+    }
   },150);
 }
 
