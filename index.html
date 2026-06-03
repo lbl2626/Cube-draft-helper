@@ -182,7 +182,7 @@
 </head>
 <body>
   <h1>Cube Draft Helper</h1>
-  <p class="sub">Simple 6/8-player Cube night helper: seating, three rounds, Swiss-style pairings, and no rematches if possible.</p>
+  <p class="sub">Simple 6/8-player Cube night helper: seating, three rounds, Swiss-style pairings, odd record groups handled, and no rematches if possible.</p>
 
   <div class="card">
     <h2>1. Players</h2>
@@ -383,39 +383,74 @@ function pairListAllowRematches(list) {
   return pairings;
 }
 
+function scoreDistance(a, b) {
+  return Math.abs(a.wins - b.wins) + Math.abs(a.losses - b.losses);
+}
+
+function pairingScore(pairs) {
+  let score = 0;
+
+  pairs.forEach(([a, b]) => {
+    // Strongly avoid rematches.
+    if (havePlayed(a, b)) score += 1000;
+
+    // Prefer same-record pairings.
+    score += scoreDistance(a, b) * 20;
+
+    // Tiny random tie-breaker, so equivalent pairings do not always look identical.
+    score += Math.random();
+  });
+
+  return score;
+}
+
+function allPossiblePairings(list) {
+  if (list.length === 0) return [[]];
+
+  const first = list[0];
+  const results = [];
+
+  for (let i = 1; i < list.length; i++) {
+    const second = list[i];
+    const rest = list.slice(1).filter((_, index) => index !== i - 1);
+
+    const subPairings = allPossiblePairings(rest);
+    subPairings.forEach(sub => {
+      results.push([[first, second], ...sub]);
+    });
+  }
+
+  return results;
+}
+
+function generateSwissPairingsSmart(list) {
+  const all = allPossiblePairings(shuffle(list));
+
+  let best = null;
+  let bestScore = Infinity;
+
+  all.forEach(pairs => {
+    const score = pairingScore(pairs);
+    if (score < bestScore) {
+      bestScore = score;
+      best = pairs;
+    }
+  });
+
+  const hasRematch = best.some(([a, b]) => havePlayed(a, b));
+  return { pairings: best, rematchWarning: hasRematch };
+}
+
 function generatePairings() {
   if (currentRound === 0) {
     return pairListAllowRematches(players);
   }
 
-  const groups = {};
-  players.forEach(p => {
-    const key = recordKey(p);
-    if (!groups[key]) groups[key] = [];
-    groups[key].push(p);
-  });
-
-  const orderedKeys = Object.keys(groups).sort((a, b) => {
-    const [aw, al] = a.split("-").map(Number);
-    const [bw, bl] = b.split("-").map(Number);
-    if (bw !== aw) return bw - aw;
-    return al - bl;
-  });
-
-  let pairings = [];
-  let rematchWarning = false;
-
-  for (const key of orderedKeys) {
-    const group = groups[key];
-    let groupPairs = pairListNoRematches(group);
-    if (!groupPairs) {
-      groupPairs = pairListAllowRematches(group);
-      rematchWarning = true;
-    }
-    pairings = pairings.concat(groupPairs);
-  }
-
-  return { pairings, rematchWarning };
+  // For 6/8 players, brute-force all possible pairings is tiny and gives better Swiss behavior:
+  // 6 players = 15 possible pairings
+  // 8 players = 105 possible pairings
+  // The score prefers same records, avoids rematches strongly, and handles odd record groups.
+  return generateSwissPairingsSmart(players);
 }
 
 function allResultsEntered() {
@@ -443,6 +478,8 @@ function generateNextRound() {
     id: "r" + currentRound + "m" + index,
     playerA: a.id,
     playerB: b.id,
+    playerARecord: a.wins + "-" + a.losses,
+    playerBRecord: b.wins + "-" + b.losses,
     winner: null,
     applied: false
   }));
@@ -517,7 +554,7 @@ function renderRounds() {
       matchDiv.innerHTML = `
         <strong>Match ${idx + 1}:</strong> ${a.name} vs ${b.name}${rematchText}
         <br>
-        <span class="small">Current records before this round: ${a.wins}-${a.losses} vs ${b.wins}-${b.losses}</span>
+        <span class="small">Records before this round: ${match.playerARecord || (a.wins + "-" + a.losses)} vs ${match.playerBRecord || (b.wins + "-" + b.losses)}</span>
         <br>
         Winner:
         <select ${selectDisabled} onchange="setWinner('${match.id}', this.value)">
