@@ -10,7 +10,7 @@
 </head>
 <body>
   <h1>Cube Draft Helper</h1>
-  <p class="sub">Select players, generate seating, play three Swiss-style rounds, and generate early pairings while slow matches finish.</p>
+  <p class="sub">Select players, generate seating, play three Swiss-style rounds, and generate safe no-rematch early pairings while slow matches finish.</p>
 
   <div class="card" id="setupCard">
     <h2>1. Select Players</h2>
@@ -64,7 +64,9 @@ function updateStandings(){const body=document.getElementById("standingsBody");b
 function resetAll(){clearSelection();players=[];seating=[];rounds=[];currentRound=0;document.getElementById("seatingCard").style.display="none";document.getElementById("roundCard").style.display="none";document.getElementById("standingsCard").style.display="none";document.getElementById("playerWarning").innerHTML="";document.getElementById("roundNotice").innerHTML="";document.getElementById("seatingList").innerHTML="";document.getElementById("seatingCopy").innerHTML=""}
 function warn(id,message){document.getElementById(id).innerHTML=`<div class="warning">${message}</div>`}function success(id,message){document.getElementById(id).innerHTML=`<div class="success">${message}</div>`}
 
-// ---------- V5 early pairing overrides ----------
+
+
+// ---------- V7 strict no-rematch early pairing overrides ----------
 
 function getRoundByNumber(roundNumber) {
   return rounds.find(r => r.round === roundNumber);
@@ -72,12 +74,6 @@ function getRoundByNumber(roundNumber) {
 
 function fullPairingCount() {
   return players.length / 2;
-}
-
-function currentRoundHasMissingPairings() {
-  if (currentRound === 0) return false;
-  const round = getRoundByNumber(currentRound);
-  return round && round.matches.length < fullPairingCount();
 }
 
 function pairedIdsInRound(roundNumber) {
@@ -93,33 +89,288 @@ function pairedIdsInRound(roundNumber) {
   return ids;
 }
 
-function addPairingsToRound(roundNumber) {
+function getKnownPlayersForRound(roundNumber) {
+  return players.filter(p => (p.wins + p.losses) === (roundNumber - 1));
+}
+
+function recordKeyForPlayer(p) {
+  return p.wins + "-" + p.losses;
+}
+
+function groupByRecord(list) {
+  const groups = {};
+  list.forEach(p => {
+    const key = recordKeyForPlayer(p);
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(p);
+  });
+  return groups;
+}
+
+function getUnfinishedMatchesBeforeRound(roundNumber) {
+  return rounds
+    .filter(r => r.round < roundNumber)
+    .flatMap(r => r.matches)
+    .filter(m => !m.applied && !m.winner);
+}
+
+function getPossibleOutcomePlayers(match) {
+  const a = players.find(p => p.id === match.playerA);
+  const b = players.find(p => p.id === match.playerB);
+
+  return [
+    {
+      winner: { player: a, record: (a.wins + 1) + "-" + a.losses },
+      loser: { player: b, record: b.wins + "-" + (b.losses + 1) }
+    },
+    {
+      winner: { player: b, record: (b.wins + 1) + "-" + b.losses },
+      loser: { player: a, record: a.wins + "-" + (a.losses + 1) }
+    }
+  ];
+}
+
+function pairListNoRematchesOnly(list) {
+  if (list.length % 2 !== 0) return null;
+
+  function backtrack(remaining, pairs) {
+    if (remaining.length === 0) return pairs;
+
+    const first = remaining[0];
+    const candidates = shuffle(remaining.slice(1)).filter(p => !havePlayed(first, p));
+
+    for (const candidate of candidates) {
+      const nextRemaining = remaining.filter(p => p.id !== first.id && p.id !== candidate.id);
+      const result = backtrack(nextRemaining, [...pairs, [first, candidate]]);
+      if (result) return result;
+    }
+
+    return null;
+  }
+
+  return backtrack(shuffle(list), []);
+}
+
+function generateNoRematchSwissPairings(list) {
+  if (list.length < 2) return { pairings: [], blockedByRematch: false };
+
+  const all = allPossiblePairings(shuffle(list));
+  let valid = all.filter(pairs => pairs.every(([a, b]) => !havePlayed(a, b)));
+
+  if (valid.length === 0) {
+    return { pairings: [], blockedByRematch: true };
+  }
+
+  let best = null;
+  let bestScore = Infinity;
+
+  valid.forEach(pairs => {
+    let score = 0;
+    pairs.forEach(([a, b]) => {
+      score += scoreDistance(a, b) * 20;
+      score += Math.random();
+    });
+
+    if (score < bestScore) {
+      bestScore = score;
+      best = pairs;
+    }
+  });
+
+  return { pairings: best, blockedByRematch: false };
+}
+
+function canFinishLaterWithoutRematch(roundNumber, proposedPairings) {
+  const unfinishedMatches = getUnfinishedMatchesBeforeRound(roundNumber);
+
+  // This check is mainly designed for one slow match, but works conservatively for more.
+  if (unfinishedMatches.length === 0) {
+    return { safe: true, reason: "" };
+  }
+
+  const alreadyPairedIds = pairedIdsInRound(roundNumber);
+  proposedPairings.forEach(([a, b]) => {
+    alreadyPairedIds.add(a.id);
+    alreadyPairedIds.add(b.id);
+  });
+
+  const knownUnpaired = getKnownPlayersForRound(roundNumber)
+    .filter(p => !alreadyPairedIds.has(p.id));
+
+  if (unfinishedMatches.length > 1) {
+    return {
+      safe: false,
+      reason: "More than one match is unfinished. Early pairings could create a future collision, so wait for another result."
+    };
+  }
+
+  const slowMatch = unfinishedMatches[0];
+  const outcomes = getPossibleOutcomePlayers(slowMatch);
+
+  for (const outcome of outcomes) {
+    const futurePlayers = [...knownUnpaired];
+
+    [outcome.winner, outcome.loser].forEach(item => {
+      // Simulated temporary player object with future record but same opponent history.
+      futurePlayers.push({
+        ...item.player,
+        wins: Number(item.record.split("-")[0]),
+        losses: Number(item.record.split("-")[1])
+      });
+    });
+
+    const groups = groupByRecord(futurePlayers);
+
+    for (const record of Object.keys(groups)) {
+      const group = groups[record];
+
+      if (group.length % 2 !== 0) {
+        return {
+          safe: false,
+          reason: "A possible result would leave an odd same-record group. Wait for the slow match."
+        };
+      }
+
+      const pairs = pairListNoRematchesOnly(group);
+      if (!pairs) {
+        const names = group.map(p => p.name).join(", ");
+        return {
+          safe: false,
+          reason: `Collision possible: if the slow match breaks the wrong way, the remaining ${record} players (${names}) cannot be paired without a rematch. Wait or regenerate later.`
+        };
+      }
+    }
+  }
+
+  return { safe: true, reason: "" };
+}
+
+// Strict early pairing rule:
+// - pair only exact same-record players
+// - never allow rematches
+// - reserve players for possible winner/loser of unfinished match
+// - before confirming, simulate both slow-match outcomes and reject early pairings
+//   if they could force a rematch later
+function generateStrictEarlyPairings(roundNumber) {
+  const alreadyPaired = pairedIdsInRound(roundNumber);
+  const knownUnpaired = getKnownPlayersForRound(roundNumber)
+    .filter(p => !alreadyPaired.has(p.id));
+
+  const unfinishedMatches = getUnfinishedMatchesBeforeRound(roundNumber);
+
+  if (unfinishedMatches.length === 0) {
+    const full = generateNoRematchSwissPairings(knownUnpaired);
+    return {
+      pairings: full.pairings,
+      blockedByRematch: full.blockedByRematch,
+      collisionWarning: ""
+    };
+  }
+
+  const groups = groupByRecord(knownUnpaired);
+  const reservedByRecord = {};
+
+  unfinishedMatches.forEach(match => {
+    getPossibleOutcomePlayers(match).forEach(outcome => {
+      [outcome.winner.record, outcome.loser.record].forEach(record => {
+        reservedByRecord[record] = Math.max(reservedByRecord[record] || 0, 1);
+      });
+    });
+  });
+
+  let candidatePlayers = [];
+
+  Object.keys(groups).forEach(record => {
+    const group = groups[record];
+    const reserve = reservedByRecord[record] || 0;
+    const availableCount = Math.max(0, group.length - reserve);
+    const evenAvailableCount = availableCount - (availableCount % 2);
+
+    if (evenAvailableCount > 0) {
+      candidatePlayers = candidatePlayers.concat(shuffle(group).slice(0, evenAvailableCount));
+    }
+  });
+
+  if (candidatePlayers.length < 2) {
+    return { pairings: [], blockedByRematch: false, collisionWarning: "" };
+  }
+
+  const candidateGroups = groupByRecord(candidatePlayers);
+  let pairings = [];
+
+  for (const group of Object.values(candidateGroups)) {
+    if (group.length < 2) continue;
+
+    const generated = generateNoRematchSwissPairings(group);
+    if (generated.blockedByRematch) {
+      return {
+        pairings: [],
+        blockedByRematch: true,
+        collisionWarning: "The available same-record players cannot be paired without a rematch."
+      };
+    }
+
+    pairings = pairings.concat(generated.pairings);
+  }
+
+  const safety = canFinishLaterWithoutRematch(roundNumber, pairings);
+  if (!safety.safe) {
+    return {
+      pairings: [],
+      blockedByRematch: true,
+      collisionWarning: safety.reason
+    };
+  }
+
+  return { pairings, blockedByRematch: false, collisionWarning: "" };
+}
+
+function currentRoundHasMissingPairings() {
+  if (currentRound === 0) return false;
+  const round = getRoundByNumber(currentRound);
+  return round && round.matches.length < fullPairingCount();
+}
+
+function addPairingsToRound(roundNumber, strictEarlyMode) {
   const round = getRoundByNumber(roundNumber);
-  if (!round) return { added: 0, rematchWarning: false };
+  if (!round) return { added: 0, blockedByRematch: false, collisionWarning: "" };
 
   const alreadyPaired = pairedIdsInRound(roundNumber);
 
-  const available = players.filter(p => {
-    const knownRecordForRound = (p.wins + p.losses) === (roundNumber - 1);
-    return knownRecordForRound && !alreadyPaired.has(p.id);
-  });
+  let generated;
+  if (strictEarlyMode) {
+    generated = generateStrictEarlyPairings(roundNumber);
+  } else {
+    const available = players.filter(p => {
+      const knownRecordForRound = (p.wins + p.losses) === (roundNumber - 1);
+      return knownRecordForRound && !alreadyPaired.has(p.id);
+    });
 
-  if (available.length < 2) {
-    return { added: 0, rematchWarning: false };
+    if (available.length < 2) return { added: 0, blockedByRematch: false, collisionWarning: "" };
+
+    if (available.length % 2 !== 0) {
+      return { added: 0, blockedByRematch: false, collisionWarning: "Odd number of available players." };
+    }
+
+    generated = generateNoRematchSwissPairings(available);
   }
 
-  if (available.length % 2 !== 0) {
-    warn("roundNotice", "Odd number of available players. Wait for one more match to finish.");
-    return { added: 0, rematchWarning: false };
+  const pairings = generated.pairings || [];
+  if (!pairings.length) {
+    return {
+      added: 0,
+      blockedByRematch: generated.blockedByRematch || false,
+      collisionWarning: generated.collisionWarning || ""
+    };
   }
-
-  const generated = generateSwissPairingsSmart(available);
-  const pairings = generated.pairings;
 
   pairings.forEach(([a, b]) => {
+    if (alreadyPaired.has(a.id) || alreadyPaired.has(b.id)) return;
+    if (havePlayed(a, b)) return;
+
     const index = round.matches.length;
     round.matches.push({
-      id: "r" + roundNumber + "m" + index + "x" + Date.now(),
+      id: "r" + roundNumber + "m" + index + "x" + Date.now() + Math.floor(Math.random() * 100000),
       playerA: a.id,
       playerB: b.id,
       playerARecord: a.wins + "-" + a.losses,
@@ -127,9 +378,16 @@ function addPairingsToRound(roundNumber) {
       winner: null,
       applied: false
     });
+
+    alreadyPaired.add(a.id);
+    alreadyPaired.add(b.id);
   });
 
-  return { added: pairings.length, rematchWarning: generated.rematchWarning };
+  return {
+    added: pairings.length,
+    blockedByRematch: false,
+    collisionWarning: ""
+  };
 }
 
 function applyCompletedResultsUpToRound(roundNumberExclusive) {
@@ -169,18 +427,21 @@ function generateNextRound() {
     return;
   }
 
-  // If this round is still missing pairings because it was generated early,
-  // first try to add pairings for newly resolved players.
   if (currentRoundHasMissingPairings()) {
     applyCompletedResultsUpToRound(currentRound);
-    const result = addPairingsToRound(currentRound);
+    const stillUnfinishedBeforeThisRound = getUnfinishedMatchesBeforeRound(currentRound).length > 0;
+    const result = addPairingsToRound(currentRound, stillUnfinishedBeforeThisRound);
 
     if (result.added === 0) {
-      warn("roundNotice", "No new safe pairing is available yet. Wait for another result.");
-    } else if (result.rematchWarning) {
-      warn("roundNotice", "Added pairing(s), but a rematch was unavoidable.");
+      if (result.collisionWarning) {
+        warn("roundNotice", result.collisionWarning);
+      } else if (result.blockedByRematch) {
+        warn("roundNotice", "Collision possible: no safe no-rematch pairing is available. Wait for the slow match to finish.");
+      } else {
+        warn("roundNotice", "No safe pairing is available yet. Wait for the slow match to finish.");
+      }
     } else {
-      success("roundNotice", "Added available pairing(s).");
+      success("roundNotice", "Added safe no-rematch pairing(s).");
     }
 
     renderRounds();
@@ -189,7 +450,6 @@ function generateNextRound() {
     return;
   }
 
-  // Normal full-round generation.
   if (allResultsEntered()) {
     if (currentRound >= 3) {
       finishIfNeeded();
@@ -200,10 +460,10 @@ function generateNextRound() {
     currentRound++;
     createRound(currentRound);
 
-    const result = addPairingsToRound(currentRound);
+    const result = addPairingsToRound(currentRound, false);
 
-    if (result.rematchWarning) {
-      warn("roundNotice", "No-rematch pairing was impossible, so the app used the best available fallback pairing.");
+    if (result.added === 0 && result.blockedByRematch) {
+      warn("roundNotice", "No legal no-rematch pairing exists with these records. Manual decision needed.");
     } else {
       document.getElementById("roundNotice").innerHTML = "";
     }
@@ -215,31 +475,33 @@ function generateNextRound() {
     return;
   }
 
-  // Early next-round generation.
   if (currentRound < 3) {
     applyResults(getRoundByNumber(currentRound));
 
     currentRound++;
     createRound(currentRound);
 
-    const result = addPairingsToRound(currentRound);
+    const result = addPairingsToRound(currentRound, true);
 
     if (result.added === 0) {
-      // Nothing useful was created, roll back the empty round.
       rounds = rounds.filter(r => r.round !== currentRound);
       currentRound--;
-      warn("roundNotice", "No safe early pairing is available yet. Wait for one more match to finish.");
+
+      if (result.collisionWarning) {
+        warn("roundNotice", result.collisionWarning);
+      } else if (result.blockedByRematch) {
+        warn("roundNotice", "Collision possible: starting early could force a rematch later. Wait for the slow match to finish.");
+      } else {
+        warn("roundNotice", "No safe early pairing is available yet. Wait for the slow match to finish.");
+      }
+
       renderRounds();
       updateRoundButtonState();
       updateStandings();
       return;
     }
 
-    if (result.rematchWarning) {
-      warn("roundNotice", "Generated early pairing(s), but a rematch was unavoidable.");
-    } else {
-      success("roundNotice", "Generated early pairing(s). Unfinished players can be added later.");
-    }
+    success("roundNotice", "Generated safe no-rematch early pairing(s). Other players wait for the slow match result.");
 
     renderRounds();
     updateRoundButtonState();
@@ -264,7 +526,7 @@ function updateRoundButtonState() {
   if (currentRoundHasMissingPairings()) {
     button.disabled = false;
     button.className = "good";
-    button.textContent = "Add Available Round " + currentRound + " Pairings";
+    button.textContent = "Add Safe Pairings";
     return;
   }
 
@@ -285,7 +547,7 @@ function updateRoundButtonState() {
   if (currentRound < 3) {
     button.disabled = false;
     button.className = "secondary";
-    button.textContent = "Generate Early Round " + (currentRound + 1);
+    button.textContent = "Generate Safe Early Round " + (currentRound + 1);
     return;
   }
 
@@ -307,13 +569,12 @@ function renderRoundBlock(round, oldRound) {
     const matchDiv = document.createElement("div");
     matchDiv.className = "matchCard";
 
-    // In early-pairing mode, an older unfinished match must remain editable.
     const locked = match.applied || document.getElementById("roundButton").disabled;
 
     matchDiv.innerHTML = `
       <div class="matchHeader">
         <strong>Match ${idx + 1}</strong>
-        <span>${match.playerARecord || (a.wins + "-" + a.losses)} vs ${match.playerBRecord || (b.wins + "-" + b.losses)}${rematch ? " · rematch" : ""}</span>
+        <span>${match.playerARecord || (a.wins + "-" + a.losses)} vs ${match.playerBRecord || (b.wins + "-" + b.losses)}${rematch ? " · REMATCH ERROR" : ""}</span>
       </div>
       <div class="winnerButtons">
         ${winnerButtonHtml(match, a, locked)}
@@ -328,7 +589,7 @@ function renderRoundBlock(round, oldRound) {
     const missing = (fullPairingCount() - round.matches.length) * 2;
     const note = document.createElement("div");
     note.className = "warning";
-    note.textContent = `${missing} player(s) are still waiting for pairing in this round. Add available pairings after more results are entered.`;
+    note.textContent = `${missing} player(s) are waiting because their legal no-rematch same-record pairing depends on an unfinished match.`;
     div.appendChild(note);
   }
 
