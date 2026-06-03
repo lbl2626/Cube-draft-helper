@@ -10,7 +10,7 @@
 </head>
 <body>
   <h1>Cube Draft Helper</h1>
-  <p class="sub">Select players, generate seating, play three Swiss-style rounds, avoid rematches if possible.</p>
+  <p class="sub">Select players, generate seating, play three Swiss-style rounds, and generate early pairings while slow matches finish.</p>
 
   <div class="card" id="setupCard">
     <h2>1. Select Players</h2>
@@ -26,7 +26,7 @@
   </div>
 
   <div class="card" id="seatingCard" style="display:none;"><h2>2. Seating</h2><div class="actions"><button onclick="generateSeating()">Generate Seating</button><button onclick="copySeating()" class="secondary">Copy Seating</button></div><ol id="seatingList"></ol><div id="seatingCopy"></div></div>
-  <div class="card" id="roundCard" style="display:none;"><h2>3. Current Round</h2><p class="small">Tap the winner in each match. When all winners are selected, generate the next round.</p><div id="roundNotice"></div><div id="currentRoundView"></div><div class="stickyAction"><button id="roundButton" onclick="generateNextRound()">Generate Round 1</button><button onclick="copyCurrentRound()" class="secondary">Copy Current Pairings</button></div><details id="previousRoundsDetails" style="display:none;"><summary>Previous rounds</summary><div id="previousRoundsView"></div></details></div>
+  <div class="card" id="roundCard" style="display:none;"><h2>3. Current Round</h2><p class="small">Tap winners as matches finish. You can generate early pairings before every match is done.</p><div id="roundNotice"></div><div id="currentRoundView"></div><div class="stickyAction"><button id="roundButton" onclick="generateNextRound()">Generate Round 1</button><button onclick="copyCurrentRound()" class="secondary">Copy Current Pairings</button></div><details id="previousRoundsDetails" style="display:none;"><summary>Previous rounds</summary><div id="previousRoundsView"></div></details></div>
   <div class="card" id="standingsCard" style="display:none;"><h2>Standings</h2><table><thead><tr><th>Player</th><th>Record</th><th>Opponents</th></tr></thead><tbody id="standingsBody"></tbody></table></div>
 
 <script>
@@ -63,6 +63,291 @@ function copyCurrentRound(){if(!rounds.length){warn("roundNotice","Generate a ro
 function updateStandings(){const body=document.getElementById("standingsBody");body.innerHTML="";const sorted=[...players].sort((a,b)=>{if(b.wins!==a.wins)return b.wins-a.wins;if(a.losses!==b.losses)return a.losses-b.losses;return a.name.localeCompare(b.name)});sorted.forEach(p=>{const opp=p.opponents.map(id=>players.find(x=>x.id===id)?.name).filter(Boolean).join(", ");const tr=document.createElement("tr");tr.innerHTML=`<td>${p.name}</td><td>${p.wins}-${p.losses}</td><td>${opp||"-"}</td>`;body.appendChild(tr)})}
 function resetAll(){clearSelection();players=[];seating=[];rounds=[];currentRound=0;document.getElementById("seatingCard").style.display="none";document.getElementById("roundCard").style.display="none";document.getElementById("standingsCard").style.display="none";document.getElementById("playerWarning").innerHTML="";document.getElementById("roundNotice").innerHTML="";document.getElementById("seatingList").innerHTML="";document.getElementById("seatingCopy").innerHTML=""}
 function warn(id,message){document.getElementById(id).innerHTML=`<div class="warning">${message}</div>`}function success(id,message){document.getElementById(id).innerHTML=`<div class="success">${message}</div>`}
+
+// ---------- V5 early pairing overrides ----------
+
+function getRoundByNumber(roundNumber) {
+  return rounds.find(r => r.round === roundNumber);
+}
+
+function fullPairingCount() {
+  return players.length / 2;
+}
+
+function currentRoundHasMissingPairings() {
+  if (currentRound === 0) return false;
+  const round = getRoundByNumber(currentRound);
+  return round && round.matches.length < fullPairingCount();
+}
+
+function pairedIdsInRound(roundNumber) {
+  const round = getRoundByNumber(roundNumber);
+  const ids = new Set();
+  if (!round) return ids;
+
+  round.matches.forEach(m => {
+    ids.add(m.playerA);
+    ids.add(m.playerB);
+  });
+
+  return ids;
+}
+
+function addPairingsToRound(roundNumber) {
+  const round = getRoundByNumber(roundNumber);
+  if (!round) return { added: 0, rematchWarning: false };
+
+  const alreadyPaired = pairedIdsInRound(roundNumber);
+
+  const available = players.filter(p => {
+    const knownRecordForRound = (p.wins + p.losses) === (roundNumber - 1);
+    return knownRecordForRound && !alreadyPaired.has(p.id);
+  });
+
+  if (available.length < 2) {
+    return { added: 0, rematchWarning: false };
+  }
+
+  if (available.length % 2 !== 0) {
+    warn("roundNotice", "Odd number of available players. Wait for one more match to finish.");
+    return { added: 0, rematchWarning: false };
+  }
+
+  const generated = generateSwissPairingsSmart(available);
+  const pairings = generated.pairings;
+
+  pairings.forEach(([a, b]) => {
+    const index = round.matches.length;
+    round.matches.push({
+      id: "r" + roundNumber + "m" + index + "x" + Date.now(),
+      playerA: a.id,
+      playerB: b.id,
+      playerARecord: a.wins + "-" + a.losses,
+      playerBRecord: b.wins + "-" + b.losses,
+      winner: null,
+      applied: false
+    });
+  });
+
+  return { added: pairings.length, rematchWarning: generated.rematchWarning };
+}
+
+function applyCompletedResultsUpToRound(roundNumberExclusive) {
+  rounds
+    .filter(r => r.round < roundNumberExclusive)
+    .forEach(r => applyResults(r));
+}
+
+function createRound(roundNumber) {
+  rounds.push({ round: roundNumber, matches: [] });
+}
+
+function generateNextRound() {
+  if (currentRound === 0) {
+    currentRound = 1;
+    createRound(1);
+
+    const pairings = pairListAllowRematches(players);
+    const round = getRoundByNumber(1);
+
+    pairings.forEach(([a, b], index) => {
+      round.matches.push({
+        id: "r1m" + index,
+        playerA: a.id,
+        playerB: b.id,
+        playerARecord: "0-0",
+        playerBRecord: "0-0",
+        winner: null,
+        applied: false
+      });
+    });
+
+    renderRounds();
+    updateRoundButtonState();
+    updateStandings();
+    document.getElementById("roundCard").scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+
+  // If this round is still missing pairings because it was generated early,
+  // first try to add pairings for newly resolved players.
+  if (currentRoundHasMissingPairings()) {
+    applyCompletedResultsUpToRound(currentRound);
+    const result = addPairingsToRound(currentRound);
+
+    if (result.added === 0) {
+      warn("roundNotice", "No new safe pairing is available yet. Wait for another result.");
+    } else if (result.rematchWarning) {
+      warn("roundNotice", "Added pairing(s), but a rematch was unavoidable.");
+    } else {
+      success("roundNotice", "Added available pairing(s).");
+    }
+
+    renderRounds();
+    updateRoundButtonState();
+    updateStandings();
+    return;
+  }
+
+  // Normal full-round generation.
+  if (allResultsEntered()) {
+    if (currentRound >= 3) {
+      finishIfNeeded();
+      return;
+    }
+
+    applyResults(getRoundByNumber(currentRound));
+    currentRound++;
+    createRound(currentRound);
+
+    const result = addPairingsToRound(currentRound);
+
+    if (result.rematchWarning) {
+      warn("roundNotice", "No-rematch pairing was impossible, so the app used the best available fallback pairing.");
+    } else {
+      document.getElementById("roundNotice").innerHTML = "";
+    }
+
+    renderRounds();
+    updateRoundButtonState();
+    updateStandings();
+    document.getElementById("roundCard").scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+
+  // Early next-round generation.
+  if (currentRound < 3) {
+    applyResults(getRoundByNumber(currentRound));
+
+    currentRound++;
+    createRound(currentRound);
+
+    const result = addPairingsToRound(currentRound);
+
+    if (result.added === 0) {
+      // Nothing useful was created, roll back the empty round.
+      rounds = rounds.filter(r => r.round !== currentRound);
+      currentRound--;
+      warn("roundNotice", "No safe early pairing is available yet. Wait for one more match to finish.");
+      renderRounds();
+      updateRoundButtonState();
+      updateStandings();
+      return;
+    }
+
+    if (result.rematchWarning) {
+      warn("roundNotice", "Generated early pairing(s), but a rematch was unavoidable.");
+    } else {
+      success("roundNotice", "Generated early pairing(s). Unfinished players can be added later.");
+    }
+
+    renderRounds();
+    updateRoundButtonState();
+    updateStandings();
+    document.getElementById("roundCard").scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+
+  alert("Enter all results before finishing the draft.");
+}
+
+function updateRoundButtonState() {
+  const button = document.getElementById("roundButton");
+
+  if (currentRound === 0) {
+    button.disabled = false;
+    button.className = "";
+    button.textContent = "Generate Round 1";
+    return;
+  }
+
+  if (currentRoundHasMissingPairings()) {
+    button.disabled = false;
+    button.className = "good";
+    button.textContent = "Add Available Round " + currentRound + " Pairings";
+    return;
+  }
+
+  if (currentRound === 3 && allResultsEntered()) {
+    button.disabled = false;
+    button.className = "good";
+    button.textContent = "Finish Draft";
+    return;
+  }
+
+  if (currentRound < 3 && allResultsEntered()) {
+    button.disabled = false;
+    button.className = "good";
+    button.textContent = "Generate Round " + (currentRound + 1);
+    return;
+  }
+
+  if (currentRound < 3) {
+    button.disabled = false;
+    button.className = "secondary";
+    button.textContent = "Generate Early Round " + (currentRound + 1);
+    return;
+  }
+
+  button.disabled = false;
+  button.className = "secondary";
+  button.textContent = "Finish When Ready";
+}
+
+function renderRoundBlock(round, oldRound) {
+  const div = document.createElement("div");
+  div.className = oldRound ? "oldRound" : "";
+  div.innerHTML = `<h3>Round ${round.round}<span class="pill">${roundLabel(round.round)}</span></h3>`;
+
+  round.matches.forEach((match, idx) => {
+    const a = players.find(p => p.id === match.playerA);
+    const b = players.find(p => p.id === match.playerB);
+    const rematch = a.opponents.includes(b.id) && !match.applied;
+
+    const matchDiv = document.createElement("div");
+    matchDiv.className = "matchCard";
+
+    // In early-pairing mode, an older unfinished match must remain editable.
+    const locked = match.applied || document.getElementById("roundButton").disabled;
+
+    matchDiv.innerHTML = `
+      <div class="matchHeader">
+        <strong>Match ${idx + 1}</strong>
+        <span>${match.playerARecord || (a.wins + "-" + a.losses)} vs ${match.playerBRecord || (b.wins + "-" + b.losses)}${rematch ? " · rematch" : ""}</span>
+      </div>
+      <div class="winnerButtons">
+        ${winnerButtonHtml(match, a, locked)}
+        <div class="versus">VS</div>
+        ${winnerButtonHtml(match, b, locked)}
+      </div>
+    `;
+    div.appendChild(matchDiv);
+  });
+
+  if (round.matches.length < fullPairingCount()) {
+    const missing = (fullPairingCount() - round.matches.length) * 2;
+    const note = document.createElement("div");
+    note.className = "warning";
+    note.textContent = `${missing} player(s) are still waiting for pairing in this round. Add available pairings after more results are entered.`;
+    div.appendChild(note);
+  }
+
+  return div;
+}
+
+function setWinner(matchId, winnerId) {
+  for (const round of rounds) {
+    const match = round.matches.find(m => m.id === matchId);
+    if (match && !match.applied) {
+      match.winner = winnerId;
+      break;
+    }
+  }
+
+  renderRounds();
+  updateRoundButtonState();
+}
+
 loadRegulars();renderSetup();
 </script>
 </body>
