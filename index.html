@@ -68,7 +68,27 @@
       .guestRow,.wagerControls,.teamGrid{grid-template-columns:1fr} table{font-size:14px} th,td{padding:8px 5px}
       .winnerBtn{min-height:58px;font-size:18px}
     }
-  </style>
+  
+.teamResultSummary{
+  border:1px solid var(--border);
+  background:#f9fafb;
+  border-radius:12px;
+  padding:10px;
+  margin:8px 0 12px;
+}
+.teamResultTitle{font-weight:900;font-size:17px;margin-bottom:4px}
+.teamBadge{
+  display:inline-block;
+  padding:2px 7px;
+  border-radius:999px;
+  background:#eef2ff;
+  color:#3730a3;
+  font-size:12px;
+  font-weight:800;
+  margin-left:6px;
+}
+
+</style>
 </head>
 <body>
   <h1>Cube Draft Helper</h1>
@@ -180,6 +200,7 @@
 
   <div class="card" id="standingsCard" style="display:none;">
     <h2>Standings</h2>
+    <div id="teamResultSummary"></div>
     <table>
       <thead><tr><th>Player</th><th>Record</th><th>Opponents</th></tr></thead>
       <tbody id="standingsBody"></tbody>
@@ -702,7 +723,55 @@ function setWinner(matchId,winnerId){
   updateRoundButtonState();
 }
 
+
+function teamMatchScore(){
+  let a=0,b=0;
+  rounds.forEach(round=>{
+    if(!round.teamMode)return;
+    round.matches.forEach(match=>{
+      if(!match.applied)return;
+      const winnerTeam=teamOfPlayer(match.winner);
+      if(winnerTeam==="A")a++;
+      if(winnerTeam==="B")b++;
+    });
+  });
+  return {A:a,B:b};
+}
+
+function renderTeamResultSummary(){
+  const el=document.getElementById("teamResultSummary");
+  if(!el)return;
+
+  if(draftMode!=="team"||!players.length){
+    el.innerHTML="";
+    return;
+  }
+
+  const score=teamMatchScore();
+  let resultText="Team draft in progress";
+  if(isDraftFinished()){
+    if(score.A>score.B)resultText=`Team A wins ${score.A}-${score.B}`;
+    else if(score.B>score.A)resultText=`Team B wins ${score.B}-${score.A}`;
+    else resultText=`Team draft tied ${score.A}-${score.B}`;
+  }else{
+    resultText=`Current team score: Team A ${score.A} - ${score.B} Team B`;
+  }
+
+  const teamA=teams.A.map(id=>players.find(p=>p.id===id)?.name).filter(Boolean).join(", ");
+  const teamB=teams.B.map(id=>players.find(p=>p.id===id)?.name).filter(Boolean).join(", ");
+
+  el.innerHTML=`
+    <div class="teamResultSummary">
+      <div class="teamResultTitle">${resultText}</div>
+      <div class="small"><strong>Team A:</strong> ${teamA || "-"}</div>
+      <div class="small"><strong>Team B:</strong> ${teamB || "-"}</div>
+    </div>
+  `;
+}
+
 function updateStandings(){
+  renderTeamResultSummary();
+
   const body=document.getElementById("standingsBody");
   body.innerHTML="";
   const sorted=[...players].sort((a,b)=>{
@@ -712,8 +781,10 @@ function updateStandings(){
   });
   sorted.forEach(p=>{
     const opp=p.opponents.map(id=>players.find(x=>x.id===id)?.name).filter(Boolean).join(", ");
+    const team=draftMode==="team"?teamOfPlayer(p.id):"";
+    const teamBadge=team?` <span class="teamBadge">Team ${team}</span>`:"";
     const tr=document.createElement("tr");
-    tr.innerHTML=`<td>${p.name}</td><td>${p.wins}-${p.losses}</td><td>${opp||"-"}</td>`;
+    tr.innerHTML=`<td>${p.name}${teamBadge}</td><td>${p.wins}-${p.losses}</td><td>${opp||"-"}</td>`;
     body.appendChild(tr);
   });
   updateSettlementPreview();
