@@ -32,7 +32,7 @@
 </head>
 <body>
   <h1>Cube Draft Helper</h1>
-  <p class="sub">Select players, generate seating, play three Swiss-style rounds, and generate safe no-rematch early pairings while slow matches finish.</p>
+  <p class="sub">Select players, generate seating, run free-for-all Swiss or team draft matches, and track settlements.</p>
 
   
   <div id="postDraftReveal" class="postDraftReveal" style="display:none;">
@@ -124,8 +124,10 @@ function setDraftMode(mode){
   if(f)f.classList.toggle("active",mode==="ffa");
   if(t)t.classList.toggle("active",mode==="team");
   updateWagerModeVisibility();
-  renderTeams();renderNoPlayPairs();
+  renderTeams();
+  renderNoPlayPairs();
   updateSettlementPreview();
+  updateRoundButtonState();
 }
 
 function updateWagerModeVisibility(){
@@ -161,11 +163,14 @@ function generateTeamDraftPairings(){
   const teamB=teams.B.map(id=>players.find(p=>p.id===id)).filter(Boolean);
   let matches=[];
 
+  // 6-player team draft: 3v3, everyone plays everyone from the other team = 9 matches.
   if(teamA.length===3&&teamB.length===3){
     teamA.forEach(a=>teamB.forEach(b=>matches.push([a,b])));
-    return matches;
+    return shuffle(matches);
   }
 
+  // 8-player team draft: 4v4, each player skips exactly one opponent from the other team.
+  // Creates a random perfect "no-play" matching, then all other cross-team matches = 12 matches.
   if(teamA.length===4&&teamB.length===4){
     const shuffledB=shuffle(teamB);
     teamA.forEach((a,i)=>{
@@ -178,6 +183,7 @@ function generateTeamDraftPairings(){
     return shuffle(matches);
   }
 
+  // Fallback: all cross-team matches.
   teamA.forEach(a=>teamB.forEach(b=>matches.push([a,b])));
   return shuffle(matches);
 }
@@ -206,14 +212,106 @@ function teamOfPlayer(id){
   return "";
 }
 
-function setDraftSize(n){draftSize=n;setDraftMode(n===6?'team':'ffa');document.getElementById("size6").classList.toggle("active",n===6);document.getElementById("size8").classList.toggle("active",n===8);while(selectedRegulars.length+guests.length>draftSize){if(guests.length>0)guests.pop();else selectedRegulars.pop()}renderSetup()}
+function setDraftSize(n){
+  draftSize=n;
+  document.getElementById("size6").classList.toggle("active",n===6);
+  document.getElementById("size8").classList.toggle("active",n===8);
+  setDraftMode(n===6?"team":"ffa");
+
+  while(selectedRegulars.length+guests.length>draftSize){
+    if(guests.length>0)guests.pop();
+    else selectedRegulars.pop();
+  }
+
+  renderSetup();
+  updateRoundButtonState();
+}
+
 function renderSetup(){const rc=document.getElementById("regularPlayers");rc.innerHTML="";regulars.forEach(name=>{const selected=selectedRegulars.includes(name);const btn=document.createElement("button");btn.className="playerChip"+(selected?" selected":"");btn.onclick=()=>toggleRegular(name);btn.innerHTML=`<span>${name}</span><span class="check">${selected?"✓":""}</span>`;rc.appendChild(btn)});const gl=document.getElementById("guestList");gl.innerHTML="";guests.forEach((name,index)=>{const div=document.createElement("div");div.className="guestItem";div.innerHTML=`<strong>${name}</strong><button class="danger miniBtn" onclick="removeGuest(${index})">Remove</button>`;gl.appendChild(div)});const count=selectedRegulars.length+guests.length;document.getElementById("selectionStatus").textContent=`Selected: ${count}/${draftSize}`;document.getElementById("startButton").disabled=count!==draftSize}
 function toggleRegular(name){const count=selectedRegulars.length+guests.length;if(selectedRegulars.includes(name)){selectedRegulars=selectedRegulars.filter(n=>n!==name)}else{if(count>=draftSize){warn("playerWarning",`You already selected ${draftSize} players. Remove someone first.`);return}selectedRegulars.push(name)}document.getElementById("playerWarning").innerHTML="";renderSetup()}
 function addGuest(){const input=document.getElementById("guestName");const name=input.value.trim();if(!name){warn("playerWarning","Enter guest name first.");return}const count=selectedRegulars.length+guests.length;if(count>=draftSize){warn("playerWarning",`You already selected ${draftSize} players. Remove someone first.`);return}const all=[...regulars,...guests].map(n=>n.toLowerCase());if(all.includes(name.toLowerCase())){warn("playerWarning","That name already exists.");return}guests.push(name);input.value="";document.getElementById("playerWarning").innerHTML="";renderSetup()}
 function removeGuest(index){guests.splice(index,1);renderSetup()}function clearSelection(){selectedRegulars=[];guests=[];document.getElementById("guestName").value="";document.getElementById("playerWarning").innerHTML="";renderSetup()}
 function shuffle(array){const arr=[...array];for(let i=arr.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]]}return arr}
-function startDraft(){setPostDraftResultsMode(false);const names=[...selectedRegulars,...guests];if(names.length!==draftSize){warn("playerWarning",`Select exactly ${draftSize} players.`);return}const unique=new Set(names.map(n=>n.toLowerCase()));if(unique.size!==names.length){warn("playerWarning","Player names must be unique.");return}localStorage.setItem("cubeDraftLastPlayers",JSON.stringify(names));players=names.map((name,index)=>({id:"p"+index,name,wins:0,losses:0,opponents:[]}));seating=[];teams={A:[],B:[]};teamNoPlayPairs=[];rounds=[];currentRound=0;document.getElementById("seatingCard").style.display="block";document.getElementById("roundCard").style.display="block";document.getElementById("standingsCard").style.display="block";document.getElementById("wagerCard").style.display="block";initWagerControls();renderSideWagers();updateWagerModeVisibility();updateSettlementPreview();document.getElementById("currentRoundView").innerHTML="";document.getElementById("previousRoundsView").innerHTML="";document.getElementById("previousRoundsDetails").style.display="none";document.getElementById("roundNotice").innerHTML="";document.getElementById("seatingList").innerHTML="";document.getElementById("seatingCopy").innerHTML="";const rb=document.getElementById("roundButton");rb.disabled=false;rb.className="";rb.textContent="Generate Round 1";updateStandings();document.getElementById("seatingCard").scrollIntoView({behavior:"smooth",block:"start"})}
-function generateSeating(){seating=shuffle(players);assignTeamsFromSeating();const list=document.getElementById("seatingList");list.innerHTML="";seating.forEach(p=>{const li=document.createElement("li");li.textContent=p.name;list.appendChild(li)});document.getElementById("seatingCopy").innerHTML="";renderTeams();initWagerControls()}
+function startDraft(){
+  setPostDraftResultsMode(false);
+  const names=[...selectedRegulars,...guests];
+
+  if(names.length!==draftSize){
+    warn("playerWarning",`Select exactly ${draftSize} players.`);
+    return;
+  }
+
+  const uniqueNames=new Set(names.map(n=>n.toLowerCase()));
+  if(uniqueNames.size!==names.length){
+    warn("playerWarning","Player names must be unique.");
+    return;
+  }
+
+  saveLastDraftPlayers(names);
+
+  players=names.map((name,index)=>({
+    id:"p"+index,
+    name,
+    wins:0,
+    losses:0,
+    opponents:[]
+  }));
+
+  seating=[];
+  teams={A:[],B:[]};
+  teamNoPlayPairs=[];
+  rounds=[];
+  currentRound=0;
+  sideWagers=[];
+
+  document.getElementById("playerWarning").innerHTML="";
+  document.getElementById("seatingCard").style.display="block";
+  document.getElementById("roundCard").style.display="block";
+  document.getElementById("standingsCard").style.display="block";
+  document.getElementById("wagerCard").style.display="block";
+
+  initWagerControls();
+  renderSideWagers();
+  updateWagerModeVisibility();
+  updateSettlementPreview();
+
+  document.getElementById("currentRoundView").innerHTML="";
+  document.getElementById("previousRoundsView").innerHTML="";
+  document.getElementById("previousRoundsDetails").style.display="none";
+  document.getElementById("roundNotice").innerHTML="";
+  document.getElementById("seatingList").innerHTML="";
+  document.getElementById("teamDisplay").innerHTML="";
+  document.getElementById("noPlayDisplay").innerHTML="";
+  document.getElementById("seatingCopy").innerHTML="";
+
+  const roundButton=document.getElementById("roundButton");
+  roundButton.disabled=false;
+  roundButton.className="";
+  updateRoundButtonState();
+
+  updateStandings();
+  document.getElementById("seatingCard").scrollIntoView({behavior:"smooth",block:"start"});
+}
+
+function generateSeating(){
+  seating=shuffle(players);
+  assignTeamsFromSeating();
+
+  const list=document.getElementById("seatingList");
+  list.innerHTML="";
+  seating.forEach(p=>{
+    const li=document.createElement("li");
+    li.textContent=p.name;
+    list.appendChild(li);
+  });
+
+  document.getElementById("seatingCopy").innerHTML="";
+  renderTeams();
+  renderNoPlayPairs();
+  updateRoundButtonState();
+  initWagerControls();
+}
+
 function copyText(text,targetId){if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(text);success(targetId,"Copied.")}else{const box=document.createElement("textarea");box.value=text;document.body.appendChild(box);box.select();document.execCommand("copy");document.body.removeChild(box);success(targetId,"Copied.")}}
 function copySeating(){if(!seating.length){warn("seatingCopy","Generate seating first.");return}const text="Cube Draft Seating\n"+seating.map((p,i)=>`${i+1}. ${p.name}`).join("\n");copyText(text,"seatingCopy")}
 function havePlayed(a,b){return a.opponents.includes(b.id)}function scoreDistance(a,b){return Math.abs(a.wins-b.wins)+Math.abs(a.losses-b.losses)}
@@ -237,16 +335,31 @@ function updateRoundButtonState(){
 
   if(draftMode==="team"){
     button.disabled=false;
+
+    if(!players.length){
+      button.className="";
+      button.textContent="Generate Team Matches";
+      return;
+    }
+
+    if(!seating.length){
+      button.className="secondary";
+      button.textContent="Generate seating first";
+      return;
+    }
+
     if(!rounds.length||!rounds[0].teamMode){
       button.className="";
       button.textContent="Generate Team Matches";
       return;
     }
+
     if(allResultsEntered()){
       button.className="good";
       button.textContent="Finish Team Draft";
       return;
     }
+
     button.className="secondary";
     button.textContent="Finish When Ready";
     return;
@@ -257,6 +370,7 @@ function updateRoundButtonState(){
     button.textContent="Finish Draft";
     return;
   }
+
   if(currentRound>0&&currentRound<3&&allResultsEntered()){
     button.className="good";
     button.textContent="Generate Round "+(currentRound+1);
@@ -276,8 +390,18 @@ function generateNextRound(){
       return;
     }
 
+    assignTeamsFromSeating();
+
     if(!rounds.length||!rounds[0].teamMode){
       const pairings=generateTeamDraftPairings();
+
+      // Safety check: never allow same-team match in team draft.
+      const illegal=pairings.some(([a,b])=>teamOfPlayer(a.id)===teamOfPlayer(b.id));
+      if(illegal){
+        alert("Team pairing error: same-team match detected. Regenerate seating or contact Lukas.");
+        return;
+      }
+
       currentRound=1;
       rounds=[{round:1,teamMode:true,matches:[]}];
 
@@ -446,6 +570,7 @@ function setWinner(matchId,winnerId){
       break;
     }
   }
+
   renderRounds();
   updateRoundButtonState();
 }
