@@ -230,8 +230,11 @@ function allResultsEntered(){
   const lastRound=rounds[currentRound-1];
   return lastRound.matches.every(m=>m.winner);
 }
+
 function updateRoundButtonState(){
   const button=document.getElementById("roundButton");
+  if(!button)return;
+
   if(draftMode==="team"){
     button.disabled=false;
     if(!rounds.length||!rounds[0].teamMode){
@@ -248,28 +251,48 @@ function updateRoundButtonState(){
     button.textContent="Finish When Ready";
     return;
   }
-if(currentRound===3&&allResultsEntered()){button.className="good";button.textContent="Finish Draft";return}if(currentRound>0&&currentRound<3&&allResultsEntered()){button.className="good";button.textContent="Generate Round "+(currentRound+1)}else if(currentRound===0){button.className="";button.textContent="Generate Round 1"}else if(currentRound<3){button.className="";button.textContent="Generate Round "+(currentRound+1)}}
+
+  if(currentRound===3&&allResultsEntered()){
+    button.className="good";
+    button.textContent="Finish Draft";
+    return;
+  }
+  if(currentRound>0&&currentRound<3&&allResultsEntered()){
+    button.className="good";
+    button.textContent="Generate Round "+(currentRound+1);
+  }else if(currentRound===0){
+    button.className="";
+    button.textContent="Generate Round 1";
+  }else if(currentRound<3){
+    button.className="";
+    button.textContent="Generate Round "+(currentRound+1);
+  }
+}
+
 function generateNextRound(){
   if(draftMode==="team"){
     if(!seating.length){
       alert("Generate seating first so teams can be created.");
       return;
     }
+
     if(!rounds.length||!rounds[0].teamMode){
       const pairings=generateTeamDraftPairings();
       currentRound=1;
       rounds=[{round:1,teamMode:true,matches:[]}];
+
       pairings.forEach(([a,b],index)=>{
         rounds[0].matches.push({
           id:"tm"+index,
           playerA:a.id,
           playerB:b.id,
-          playerARecord:a.wins+"-"+a.losses,
-          playerBRecord:b.wins+"-"+b.losses,
+          playerARecord:"0-0",
+          playerBRecord:"0-0",
           winner:null,
           applied:false
         });
       });
+
       renderNoPlayPairs();
       renderRounds();
       updateRoundButtonState();
@@ -277,10 +300,12 @@ function generateNextRound(){
       document.getElementById("roundCard").scrollIntoView({behavior:"smooth",block:"start"});
       return;
     }
+
     if(!allResultsEntered()){
       alert("Enter all team match results before finishing.");
       return;
     }
+
     applyResults(rounds[0]);
     document.getElementById("roundButton").disabled=true;
     document.getElementById("roundButton").className="";
@@ -291,7 +316,49 @@ function generateNextRound(){
     scrollToSettlementsSoon();
     return;
   }
-if(currentRound>=3){finishIfNeeded();scrollToSettlementsSoon();return}if(!allResultsEntered()){alert("Enter all results before generating the next round.");return}if(currentRound>0)applyResults(rounds[currentRound-1]);currentRound++;const generated=generatePairings();const pairings=Array.isArray(generated)?generated:generated.pairings;const rematchWarning=Array.isArray(generated)?false:generated.rematchWarning;const matches=pairings.map(([a,b],index)=>({id:"r"+currentRound+"m"+index,playerA:a.id,playerB:b.id,playerARecord:a.wins+"-"+a.losses,playerBRecord:b.wins+"-"+b.losses,winner:null,applied:false}));rounds.push({round:currentRound,matches});renderRounds();if(rematchWarning)warn("roundNotice","No-rematch pairing was impossible, so the app used the best available fallback pairing.");else document.getElementById("roundNotice").innerHTML="";updateRoundButtonState();updateStandings();document.getElementById("roundCard").scrollIntoView({behavior:"smooth",block:"start"})}
+
+  if(currentRound>=3){
+    finishIfNeeded();
+    scrollToSettlementsSoon();
+    return;
+  }
+
+  if(!allResultsEntered()){
+    alert("Enter all results before generating the next round.");
+    return;
+  }
+
+  if(currentRound>0)applyResults(rounds[currentRound-1]);
+
+  currentRound++;
+  const generated=generatePairings();
+  const pairings=Array.isArray(generated)?generated:generated.pairings;
+  const rematchWarning=Array.isArray(generated)?false:generated.rematchWarning;
+
+  const matches=pairings.map(([a,b],index)=>({
+    id:"r"+currentRound+"m"+index,
+    playerA:a.id,
+    playerB:b.id,
+    playerARecord:a.wins+"-"+a.losses,
+    playerBRecord:b.wins+"-"+b.losses,
+    winner:null,
+    applied:false
+  }));
+
+  rounds.push({round:currentRound,matches});
+  renderRounds();
+
+  if(rematchWarning){
+    warn("roundNotice","No-rematch pairing was impossible, so the app used the best available fallback pairing.");
+  }else{
+    document.getElementById("roundNotice").innerHTML="";
+  }
+
+  updateRoundButtonState();
+  updateStandings();
+  document.getElementById("roundCard").scrollIntoView({behavior:"smooth",block:"start"});
+}
+
 function applyResults(round){round.matches.forEach(match=>{if(match.applied||!match.winner)return;const a=players.find(p=>p.id===match.playerA),b=players.find(p=>p.id===match.playerB),winner=players.find(p=>p.id===match.winner),loser=winner.id===a.id?b:a;winner.wins++;loser.losses++;if(!a.opponents.includes(b.id))a.opponents.push(b.id);if(!b.opponents.includes(a.id))b.opponents.push(a.id);match.applied=true})}
 
 
@@ -329,10 +396,60 @@ function scrollToSettlementsSoon(){
 
 function finishIfNeeded(){if(currentRound===3&&allResultsEntered()){applyResults(rounds[2]);const rb=document.getElementById("roundButton");rb.disabled=true;rb.className="";rb.textContent="Draft Finished";renderRounds();updateStandings();setPostDraftResultsMode(true);scrollToSettlementsSoon();scrollToSettlementsSoon()}}
 function renderRounds(){const cur=document.getElementById("currentRoundView"),prev=document.getElementById("previousRoundsView");cur.innerHTML="";prev.innerHTML="";rounds.forEach(round=>{const block=renderRoundBlock(round,round.round!==currentRound);if(round.round===currentRound)cur.appendChild(block);else prev.appendChild(block)});document.getElementById("previousRoundsDetails").style.display=rounds.length>1?"block":"none"}
-function renderRoundBlock(round,oldRound){const div=document.createElement("div");div.className=oldRound?"oldRound":"";div.innerHTML=round.teamMode?`<h3>Team matches<span class="pill">team draft</span></h3>`:`<h3>Round ${round.round}<span class="pill">${roundLabel(round.round)}</span></h3>`;round.matches.forEach((match,idx)=>{const a=players.find(p=>p.id===match.playerA),b=players.find(p=>p.id===match.playerB);const rematch=a.opponents.includes(b.id)&&!match.applied;const matchDiv=document.createElement("div");matchDiv.className="matchCard";const locked=round.round!==currentRound||match.applied||document.getElementById("roundButton").disabled;matchDiv.innerHTML=`<div class="matchHeader"><strong>Match ${idx+1}</strong><span>${match.playerARecord||a.wins+"-"+a.losses} vs ${match.playerBRecord||b.wins+"-"+b.losses}${rematch?" · rematch":""}</span></div><div class="winnerButtons">${winnerButtonHtml(match,a,locked)}<div class="versus">VS</div>${winnerButtonHtml(match,b,locked)}</div>`;div.appendChild(matchDiv)});return div}
+function renderRoundBlock(round,oldRound){
+  const div=document.createElement("div");
+  div.className=oldRound?"oldRound":"";
+  div.innerHTML=round.teamMode?`<h3>Team matches<span class="pill">team draft</span></h3>`:`<h3>Round ${round.round}<span class="pill">${roundLabel(round.round)}</span></h3>`;
+
+  round.matches.forEach((match,idx)=>{
+    const a=players.find(p=>p.id===match.playerA);
+    const b=players.find(p=>p.id===match.playerB);
+    const rematch=a.opponents.includes(b.id)&&!match.applied;
+
+    const matchDiv=document.createElement("div");
+    matchDiv.className="matchCard";
+
+    const locked=match.applied||document.getElementById("roundButton").disabled;
+
+    matchDiv.innerHTML=`
+      <div class="matchHeader">
+        <strong>Match ${idx+1}</strong>
+        <span>${match.playerARecord||a.wins+"-"+a.losses} vs ${match.playerBRecord||b.wins+"-"+b.losses}${rematch&&!round.teamMode?" · REMATCH ERROR":""}</span>
+      </div>
+      <div class="winnerButtons">
+        ${winnerButtonHtml(match,a,locked)}
+        <div class="versus">VS</div>
+        ${winnerButtonHtml(match,b,locked)}
+      </div>
+    `;
+    div.appendChild(matchDiv);
+  });
+
+  if(!round.teamMode&&round.matches.length<fullPairingCount()){
+    const missing=(fullPairingCount()-round.matches.length)*2;
+    const note=document.createElement("div");
+    note.className="warning";
+    note.textContent=`${missing} player(s) are waiting because their legal no-rematch same-record pairing depends on an unfinished match.`;
+    div.appendChild(note);
+  }
+
+  return div;
+}
+
 function winnerButtonHtml(match,player,locked){const selected=match.winner===player.id;const classes=["winnerBtn"];if(selected)classes.push("selected");if(locked)classes.push("disabled");const onclick=locked?"":`onclick="setWinner('${match.id}', '${player.id}')"`;return `<button class="${classes.join(" ")}" ${onclick}><span>${player.name}</span><span class="check">${selected?"✓":""}</span></button>`}
 function roundLabel(round){if(round===1)return"random";if(round===2)return"Swiss";return"final Swiss"}
-function setWinner(matchId,winnerId){for(const round of rounds){const match=round.matches.find(m=>m.id===matchId);if(match){match.winner=winnerId;break}}renderRounds();updateRoundButtonState();if(currentRound===3&&allResultsEntered())document.getElementById("roundButton").className="good"}
+function setWinner(matchId,winnerId){
+  for(const round of rounds){
+    const match=round.matches.find(m=>m.id===matchId);
+    if(match&&!match.applied){
+      match.winner=winnerId;
+      break;
+    }
+  }
+  renderRounds();
+  updateRoundButtonState();
+}
+
 function copyCurrentRound(){if(!rounds.length){warn("roundNotice","Generate a round first.");return}const round=rounds[rounds.length-1];const lines=[`Cube Draft - Round ${round.round} Pairings`];round.matches.forEach((m,i)=>{const a=players.find(p=>p.id===m.playerA),b=players.find(p=>p.id===m.playerB);lines.push(`${i+1}. ${a.name} vs ${b.name}`)});copyText(lines.join("\n"),"roundNotice")}
 function updateStandings(){const body=document.getElementById("standingsBody");body.innerHTML="";const sorted=[...players].sort((a,b)=>{if(b.wins!==a.wins)return b.wins-a.wins;if(a.losses!==b.losses)return a.losses-b.losses;return a.name.localeCompare(b.name)});sorted.forEach(p=>{const opp=p.opponents.map(id=>players.find(x=>x.id===id)?.name).filter(Boolean).join(", ");const tr=document.createElement("tr");tr.innerHTML=`<td>${p.name}</td><td>${p.wins}-${p.losses}</td><td>${opp||"-"}</td>`;body.appendChild(tr)});updateSettlementPreview()}
 
