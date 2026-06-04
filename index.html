@@ -22,6 +22,12 @@
 .postDraftHidden{display:none!important}
 .postDraftReveal{margin:12px 0}
 
+
+.teamBox{border:1px solid var(--border);border-radius:12px;padding:10px;margin:8px 0;background:#f9fafb}
+.teamGrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+.teamName{font-weight:900;margin-bottom:6px}
+@media(max-width:560px){.teamGrid{grid-template-columns:1fr}}
+
 </style>
 </head>
 <body>
@@ -36,6 +42,11 @@
   <div class="card" id="setupCard">
     <h2>1. Select Players</h2>
     <div class="sizeToggle"><button id="size6" class="sizeBtn" onclick="setDraftSize(6)">6 players</button><button id="size8" class="sizeBtn active" onclick="setDraftSize(8)">8 players</button></div>
+    <h3>Draft type</h3>
+    <div class="sizeToggle">
+      <button id="modeFFA" class="sizeBtn active" onclick="setDraftMode('ffa')">Free-for-all</button>
+      <button id="modeTeam" class="sizeBtn" onclick="setDraftMode('team')">Team draft</button>
+    </div>
     <div class="selectionStatus" id="selectionStatus">Selected: 0/8</div>
     <p class="small">Tap regular players who are present. Add guests by name if needed.</p>
     <h3>Regulars</h3><div id="regularPlayers" class="playerGrid"></div>
@@ -46,21 +57,23 @@
     <div id="playerWarning"></div>
   </div>
 
-  <div class="card" id="seatingCard" style="display:none;"><h2>2. Seating</h2><div class="actions"><button onclick="generateSeating()">Generate Seating</button></div><ol id="seatingList"></ol><div id="seatingCopy"></div></div>
+  <div class="card" id="seatingCard" style="display:none;"><h2>2. Seating</h2><div class="actions"><button onclick="generateSeating()">Generate Seating</button></div><ol id="seatingList"></ol><div id="teamDisplay"></div><div id="seatingCopy"></div></div>
   <div class="card" id="roundCard" style="display:none;"><h2>3. Current Round</h2><p class="small">Tap winners as matches finish. You can generate early pairings before every match is done.</p><div id="roundNotice"></div><div id="currentRoundView"></div><div class="stickyAction"><button id="roundButton" onclick="generateNextRound()">Generate Round 1</button></div><details id="previousRoundsDetails" style="display:none;"><summary>Previous rounds</summary><div id="previousRoundsView"></div></details></div>
   
 <div class="card" id="wagerCard" style="display:none;">
   <h2>4. Wagers & Settlements</h2>
   <p class="small">Friendly settlement tracker. Default model: 8 players, 1000 CZK entry, 3-0 gets 5000, each 2-1 gets 1000 back.</p>
 
-  <h3>Prize model</h3>
+  <div id="ffaPrizeModel"><h3>Prize model</h3>
   <div class="moneyGrid">
     <div class="moneyInput"><label>Entry fee</label><input id="entryFee" type="number" value="1000" min="0" step="100" oninput="updateSettlementPreview()"></div>
     <div class="moneyInput"><label>3-0 payout</label><input id="payout30" type="number" value="5000" min="0" step="100" oninput="updateSettlementPreview()"></div>
     <div class="moneyInput"><label>2-1 payout</label><input id="payout21" type="number" value="1000" min="0" step="100" oninput="updateSettlementPreview()"></div>
     <div class="moneyInput"><label>1-2 payout</label><input id="payout12" type="number" value="0" min="0" step="100" oninput="updateSettlementPreview()"></div>
     <div class="moneyInput"><label>0-3 payout</label><input id="payout03" type="number" value="0" min="0" step="100" oninput="updateSettlementPreview()"></div>
-  </div>
+  </div></div>
+
+  <div id="teamPrizeModel" style="display:none;"><h3>Team draft wager</h3><div class="moneyGrid"><div class="moneyInput"><label>Team wager per player</label><input id="teamWager" type="number" value="1000" min="0" step="100" oninput="updateSettlementPreview()"></div></div><p class="small">Winning team gets this amount per player. Losing team pays this amount per player.</p></div>
 
   <h3 style="margin-top:16px;">Side wagers</h3>
   <p class="small">Winner is whoever has the better final record. Same record = wager is void.</p>
@@ -88,14 +101,61 @@
 const DEFAULT_REGULARS=["Bertík","Flochy","René","Zubař","KK","Batrs","Stráča","Slávek","Vít Vávra","Vítek Říman","Buky"];
 let draftSize=8,regulars=[],selectedRegulars=[],guests=[],players=[],seating=[],rounds=[],currentRound=0;sideWagers=[];
 function loadRegulars(){const saved=localStorage.getItem("cubeDraftRegulars");if(saved){regulars=JSON.parse(saved);regulars=regulars.map(n=>n==="Vítek"?"Vítek Říman":n);localStorage.setItem("cubeDraftRegulars",JSON.stringify(regulars))}else{regulars=[...DEFAULT_REGULARS];localStorage.setItem("cubeDraftRegulars",JSON.stringify(regulars))}}
-function setDraftSize(n){draftSize=n;document.getElementById("size6").classList.toggle("active",n===6);document.getElementById("size8").classList.toggle("active",n===8);while(selectedRegulars.length+guests.length>draftSize){if(guests.length>0)guests.pop();else selectedRegulars.pop()}renderSetup()}
+
+function setDraftMode(mode){
+  draftMode=mode;
+  const f=document.getElementById("modeFFA"),t=document.getElementById("modeTeam");
+  if(f)f.classList.toggle("active",mode==="ffa");
+  if(t)t.classList.toggle("active",mode==="team");
+  updateWagerModeVisibility();
+  renderTeams();
+  updateSettlementPreview();
+}
+
+function updateWagerModeVisibility(){
+  const ffa=document.getElementById("ffaPrizeModel");
+  const team=document.getElementById("teamPrizeModel");
+  if(ffa)ffa.style.display=draftMode==="team"?"none":"block";
+  if(team)team.style.display=draftMode==="team"?"block":"none";
+}
+
+function assignTeamsFromSeating(){
+  teams={A:[],B:[]};
+  if(draftMode!=="team"||!seating.length)return;
+  seating.forEach((p,i)=>{
+    if(i%2===0)teams.A.push(p.id);
+    else teams.B.push(p.id);
+  });
+}
+
+function renderTeams(){
+  const el=document.getElementById("teamDisplay");
+  if(!el)return;
+  if(draftMode!=="team"){el.innerHTML="";return}
+  if(!seating.length){el.innerHTML='<div class="warning">Generate seating to create alternating teams.</div>';return}
+  const teamA=teams.A.map(id=>players.find(p=>p.id===id)?.name).filter(Boolean);
+  const teamB=teams.B.map(id=>players.find(p=>p.id===id)?.name).filter(Boolean);
+  el.innerHTML=`<h3>Teams</h3><div class="teamGrid"><div class="teamBox"><div class="teamName">Team A</div>${teamA.map(n=>`<div>${n}</div>`).join("")}</div><div class="teamBox"><div class="teamName">Team B</div>${teamB.map(n=>`<div>${n}</div>`).join("")}</div></div>`;
+}
+
+function teamWins(teamIds){
+  return teamIds.reduce((sum,id)=>sum+(players.find(p=>p.id===id)?.wins||0),0);
+}
+
+function teamOfPlayer(id){
+  if(teams.A.includes(id))return "A";
+  if(teams.B.includes(id))return "B";
+  return "";
+}
+
+function setDraftSize(n){draftSize=n;setDraftMode(n===6?'team':'ffa');document.getElementById("size6").classList.toggle("active",n===6);document.getElementById("size8").classList.toggle("active",n===8);while(selectedRegulars.length+guests.length>draftSize){if(guests.length>0)guests.pop();else selectedRegulars.pop()}renderSetup()}
 function renderSetup(){const rc=document.getElementById("regularPlayers");rc.innerHTML="";regulars.forEach(name=>{const selected=selectedRegulars.includes(name);const btn=document.createElement("button");btn.className="playerChip"+(selected?" selected":"");btn.onclick=()=>toggleRegular(name);btn.innerHTML=`<span>${name}</span><span class="check">${selected?"✓":""}</span>`;rc.appendChild(btn)});const gl=document.getElementById("guestList");gl.innerHTML="";guests.forEach((name,index)=>{const div=document.createElement("div");div.className="guestItem";div.innerHTML=`<strong>${name}</strong><button class="danger miniBtn" onclick="removeGuest(${index})">Remove</button>`;gl.appendChild(div)});const count=selectedRegulars.length+guests.length;document.getElementById("selectionStatus").textContent=`Selected: ${count}/${draftSize}`;document.getElementById("startButton").disabled=count!==draftSize}
 function toggleRegular(name){const count=selectedRegulars.length+guests.length;if(selectedRegulars.includes(name)){selectedRegulars=selectedRegulars.filter(n=>n!==name)}else{if(count>=draftSize){warn("playerWarning",`You already selected ${draftSize} players. Remove someone first.`);return}selectedRegulars.push(name)}document.getElementById("playerWarning").innerHTML="";renderSetup()}
 function addGuest(){const input=document.getElementById("guestName");const name=input.value.trim();if(!name){warn("playerWarning","Enter guest name first.");return}const count=selectedRegulars.length+guests.length;if(count>=draftSize){warn("playerWarning",`You already selected ${draftSize} players. Remove someone first.`);return}const all=[...regulars,...guests].map(n=>n.toLowerCase());if(all.includes(name.toLowerCase())){warn("playerWarning","That name already exists.");return}guests.push(name);input.value="";document.getElementById("playerWarning").innerHTML="";renderSetup()}
 function removeGuest(index){guests.splice(index,1);renderSetup()}function clearSelection(){selectedRegulars=[];guests=[];document.getElementById("guestName").value="";document.getElementById("playerWarning").innerHTML="";renderSetup()}
 function shuffle(array){const arr=[...array];for(let i=arr.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]]}return arr}
-function startDraft(){setPostDraftResultsMode(false);const names=[...selectedRegulars,...guests];if(names.length!==draftSize){warn("playerWarning",`Select exactly ${draftSize} players.`);return}const unique=new Set(names.map(n=>n.toLowerCase()));if(unique.size!==names.length){warn("playerWarning","Player names must be unique.");return}localStorage.setItem("cubeDraftLastPlayers",JSON.stringify(names));players=names.map((name,index)=>({id:"p"+index,name,wins:0,losses:0,opponents:[]}));seating=[];rounds=[];currentRound=0;document.getElementById("seatingCard").style.display="block";document.getElementById("roundCard").style.display="block";document.getElementById("standingsCard").style.display="block";document.getElementById("wagerCard").style.display="block";renderWagerPlayerOptions();renderSideWagers();updateSettlementPreview();document.getElementById("currentRoundView").innerHTML="";document.getElementById("previousRoundsView").innerHTML="";document.getElementById("previousRoundsDetails").style.display="none";document.getElementById("roundNotice").innerHTML="";document.getElementById("seatingList").innerHTML="";document.getElementById("seatingCopy").innerHTML="";const rb=document.getElementById("roundButton");rb.disabled=false;rb.className="";rb.textContent="Generate Round 1";updateStandings();document.getElementById("seatingCard").scrollIntoView({behavior:"smooth",block:"start"})}
-function generateSeating(){seating=shuffle(players);const list=document.getElementById("seatingList");list.innerHTML="";seating.forEach(p=>{const li=document.createElement("li");li.textContent=p.name;list.appendChild(li)});document.getElementById("seatingCopy").innerHTML=""}
+function startDraft(){setPostDraftResultsMode(false);const names=[...selectedRegulars,...guests];if(names.length!==draftSize){warn("playerWarning",`Select exactly ${draftSize} players.`);return}const unique=new Set(names.map(n=>n.toLowerCase()));if(unique.size!==names.length){warn("playerWarning","Player names must be unique.");return}localStorage.setItem("cubeDraftLastPlayers",JSON.stringify(names));players=names.map((name,index)=>({id:"p"+index,name,wins:0,losses:0,opponents:[]}));seating=[];teams={A:[],B:[]};rounds=[];currentRound=0;document.getElementById("seatingCard").style.display="block";document.getElementById("roundCard").style.display="block";document.getElementById("standingsCard").style.display="block";document.getElementById("wagerCard").style.display="block";renderWagerPlayerOptions();renderSideWagers();updateWagerModeVisibility();updateSettlementPreview();document.getElementById("currentRoundView").innerHTML="";document.getElementById("previousRoundsView").innerHTML="";document.getElementById("previousRoundsDetails").style.display="none";document.getElementById("roundNotice").innerHTML="";document.getElementById("seatingList").innerHTML="";document.getElementById("seatingCopy").innerHTML="";const rb=document.getElementById("roundButton");rb.disabled=false;rb.className="";rb.textContent="Generate Round 1";updateStandings();document.getElementById("seatingCard").scrollIntoView({behavior:"smooth",block:"start"})}
+function generateSeating(){seating=shuffle(players);assignTeamsFromSeating();const list=document.getElementById("seatingList");list.innerHTML="";seating.forEach(p=>{const li=document.createElement("li");li.textContent=p.name;list.appendChild(li)});document.getElementById("seatingCopy").innerHTML="";renderTeams()}
 function copyText(text,targetId){if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(text);success(targetId,"Copied.")}else{const box=document.createElement("textarea");box.value=text;document.body.appendChild(box);box.select();document.execCommand("copy");document.body.removeChild(box);success(targetId,"Copied.")}}
 function copySeating(){if(!seating.length){warn("seatingCopy","Generate seating first.");return}const text="Cube Draft Seating\n"+seating.map((p,i)=>`${i+1}. ${p.name}`).join("\n");copyText(text,"seatingCopy")}
 function havePlayed(a,b){return a.opponents.includes(b.id)}function scoreDistance(a,b){return Math.abs(a.wins-b.wins)+Math.abs(a.losses-b.losses)}
@@ -205,12 +265,52 @@ function addSideWager(){
 function removeSideWager(id){sideWagers=sideWagers.filter(w=>w.id!==id);renderSideWagers();updateSettlementPreview()}
 function renderSideWagers(){const c=document.getElementById("sideWagers");if(!c)return;c.innerHTML="";if(!sideWagers.length){c.innerHTML='<p class="small">No side wagers yet.</p>';return}sideWagers.forEach(w=>{const a=players.find(p=>p.id===w.playerA),b=players.find(p=>p.id===w.playerB);if(!a||!b)return;const d=document.createElement("div");d.className="wagerRow";d.innerHTML=`<strong>${a.name}</strong> vs <strong>${b.name}</strong> <span class="pill">${w.amount} CZK</span>${w.group==="all"?' <span class="pill">vs all</span>':''}<button class="danger miniBtn" style="float:right;" onclick="removeSideWager('${w.id}')">Remove</button><div style="clear:both;"></div>`;c.appendChild(d)})}
 function compareFinalRecord(a,b){if(a.wins!==b.wins)return a.wins>b.wins?1:-1;if(a.losses!==b.losses)return a.losses<b.losses?1:-1;return 0}
-function calculateSettlements(){const entry=moneyValue("entryFee"),finished=isDraftFinished(),balances={},prizeLines=[],wagerLines=[];players.forEach(p=>{const payout=finished?getPayoutForRecord(p):0;balances[p.id]=payout-entry;prizeLines.push({player:p.name,record:p.wins+"-"+p.losses,entry,payout,net:balances[p.id]})});if(finished){sideWagers.forEach(w=>{const a=players.find(p=>p.id===w.playerA),b=players.find(p=>p.id===w.playerB);if(!a||!b)return;const cmp=compareFinalRecord(a,b);if(cmp===0){wagerLines.push(`${a.name} vs ${b.name}: void, same record`);return}const winner=cmp>0?a:b,loser=cmp>0?b:a;balances[winner.id]+=w.amount;balances[loser.id]-=w.amount;wagerLines.push(`${winner.name} wins ${w.amount} CZK from ${loser.name}`)})}return{balances,prizeLines,wagerLines,draftFinished:finished}}
+function calculateSettlements(){
+  const entry=moneyValue("entryFee"),finished=isDraftFinished(),balances={},prizeLines=[],wagerLines=[];
+  players.forEach(p=>{
+    let base=0;
+    if(finished){
+      if(draftMode==="team"){
+        const wager=moneyValue("teamWager");
+        const aWins=teamWins(teams.A),bWins=teamWins(teams.B);
+        const playerTeam=teamOfPlayer(p.id);
+        if(aWins!==bWins){
+          const winningTeam=aWins>bWins?"A":"B";
+          base=playerTeam===winningTeam?wager:-wager;
+        }
+      }else{
+        base=getPayoutForRecord(p)-entry;
+      }
+    }else{
+      base=draftMode==="team"?0:-entry;
+    }
+    balances[p.id]=base;
+    prizeLines.push({player:p.name,record:p.wins+"-"+p.losses,entry,payout:base,net:balances[p.id]});
+  });
+  if(finished){
+    if(draftMode==="team"){
+      const aWins=teamWins(teams.A),bWins=teamWins(teams.B);
+      if(aWins===bWins)wagerLines.push("Team draft: void, tied team score");
+      else wagerLines.push(`Team draft: Team ${aWins>bWins?"A":"B"} wins ${moneyValue("teamWager")} CZK per player`);
+    }
+    sideWagers.forEach(w=>{
+      const a=players.find(p=>p.id===w.playerA),b=players.find(p=>p.id===w.playerB);
+      if(!a||!b)return;
+      const cmp=compareFinalRecord(a,b);
+      if(cmp===0){wagerLines.push(`${a.name} vs ${b.name}: void, same record`);return}
+      const winner=cmp>0?a:b,loser=cmp>0?b:a;
+      balances[winner.id]+=w.amount;
+      balances[loser.id]-=w.amount;
+      wagerLines.push(`${winner.name} wins ${w.amount} CZK from ${loser.name}`)
+    })
+  }
+  return{balances,prizeLines,wagerLines,draftFinished:finished}
+}
 function updateSettlementPreview(){const c=document.getElementById("settlementPreview");if(!c)return;renderSideWagers();if(!players.length){c.innerHTML="Start draft to calculate settlements.";return}const r=calculateSettlements(),entry=moneyValue("entryFee"),pool=players.length*entry,total=r.draftFinished?r.prizeLines.reduce((s,l)=>s+l.payout,0):0;let out="";if(!r.draftFinished){out+=`<div class="warning">Final settlement appears after Round 3 is finished. Current view only shows setup and entry pool.</div>`}else{[...players].sort((a,b)=>r.balances[b.id]-r.balances[a.id]).forEach(p=>{const net=r.balances[p.id],cls=net>=0?"positive":"negative",sign=net>0?"+":"";out+=`<div class="settlementLine"><span>${p.name} <span class="small">${p.wins}-${p.losses}</span></span><span class="${cls}">${sign}${net} CZK</span></div>`});if(r.wagerLines.length){out+=`<h3 style="margin-top:14px;">Side wager results</h3>`;r.wagerLines.forEach(line=>out+=`<div class="settlementLine"><span>${line}</span></div>`)}}c.innerHTML=out}
 function settlementText(){if(!players.length)return"No draft started.";const r=calculateSettlements(),entry=moneyValue("entryFee");let lines=["Cube Draft Settlements",`Entry: ${entry} CZK`,""];if(!r.draftFinished){lines.push("Draft is not finished yet.");return lines.join("\n")}[...players].sort((a,b)=>r.balances[b.id]-r.balances[a.id]).forEach(p=>{const net=r.balances[p.id],sign=net>0?"+":"";lines.push(`${p.name} (${p.wins}-${p.losses}): ${sign}${net} CZK`)});if(r.wagerLines.length){lines.push("");lines.push("Side wagers:");r.wagerLines.forEach(line=>lines.push(line))}return lines.join("\n")}
 function copySettlements(){copyText(settlementText(),"settlementCopy")}
 
-function resetAll(){setPostDraftResultsMode(false);clearSelection();players=[];seating=[];rounds=[];currentRound=0;document.getElementById("seatingCard").style.display="none";document.getElementById("roundCard").style.display="none";document.getElementById("standingsCard").style.display="none";document.getElementById("wagerCard").style.display="none";document.getElementById("playerWarning").innerHTML="";document.getElementById("roundNotice").innerHTML="";document.getElementById("seatingList").innerHTML="";document.getElementById("seatingCopy").innerHTML=""}
+function resetAll(){setPostDraftResultsMode(false);clearSelection();players=[];seating=[];teams={A:[],B:[]};rounds=[];currentRound=0;document.getElementById("seatingCard").style.display="none";document.getElementById("roundCard").style.display="none";document.getElementById("standingsCard").style.display="none";document.getElementById("wagerCard").style.display="none";document.getElementById("playerWarning").innerHTML="";document.getElementById("roundNotice").innerHTML="";document.getElementById("seatingList").innerHTML="";document.getElementById("seatingCopy").innerHTML=""}
 function warn(id,message){document.getElementById(id).innerHTML=`<div class="warning">${message}</div>`}function success(id,message){document.getElementById(id).innerHTML=`<div class="success">${message}</div>`}
 
 
@@ -758,7 +858,7 @@ function setWinner(matchId, winnerId) {
   updateRoundButtonState();
 }
 
-loadRegulars();renderSetup();
+loadRegulars();setDraftMode(draftSize===6?'team':'ffa');renderSetup();
 </script>
 </body>
 </html>
