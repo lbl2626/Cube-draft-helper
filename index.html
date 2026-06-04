@@ -99,8 +99,24 @@
 
 <script>
 const DEFAULT_REGULARS=["Bertík","Flochy","René","Zubař","KK","Batrs","Stráča","Slávek","Vít Vávra","Vítek Říman","Buky"];
-let draftSize=8,regulars=[],selectedRegulars=[],guests=[],players=[],seating=[],rounds=[],currentRound=0;sideWagers=[];
-function loadRegulars(){const saved=localStorage.getItem("cubeDraftRegulars");if(saved){regulars=JSON.parse(saved);regulars=regulars.map(n=>n==="Vítek"?"Vítek Říman":n);localStorage.setItem("cubeDraftRegulars",JSON.stringify(regulars))}else{regulars=[...DEFAULT_REGULARS];localStorage.setItem("cubeDraftRegulars",JSON.stringify(regulars))}}
+let draftSize=8,regulars=[],selectedRegulars=[],guests=[],players=[],seating=[],rounds=[],currentRound=0;let sideWagers=[];let wagerMode='1v1';let draftMode='ffa';let teams={A:[],B:[]};let teamNoPlayPairs=[];
+function loadRegulars(){
+  const saved=localStorage.getItem("cubeDraftRegulars");
+  try{
+    if(saved){
+      regulars=JSON.parse(saved);
+      if(!Array.isArray(regulars)||regulars.length===0)regulars=[...DEFAULT_REGULARS];
+      regulars=regulars.map(n=>n==="Vítek"?"Vítek Říman":n);
+      localStorage.setItem("cubeDraftRegulars",JSON.stringify(regulars));
+    }else{
+      regulars=[...DEFAULT_REGULARS];
+      localStorage.setItem("cubeDraftRegulars",JSON.stringify(regulars));
+    }
+  }catch(e){
+    regulars=[...DEFAULT_REGULARS];
+    localStorage.setItem("cubeDraftRegulars",JSON.stringify(regulars));
+  }
+}
 
 function setDraftMode(mode){
   draftMode=mode;
@@ -232,7 +248,7 @@ function updateRoundButtonState(){
     button.textContent="Finish When Ready";
     return;
   }
-const button=document.getElementById("roundButton");if(currentRound===3&&allResultsEntered()){button.className="good";button.textContent="Finish Draft";return}if(currentRound>0&&currentRound<3&&allResultsEntered()){button.className="good";button.textContent="Generate Round "+(currentRound+1)}else if(currentRound===0){button.className="";button.textContent="Generate Round 1"}else if(currentRound<3){button.className="";button.textContent="Generate Round "+(currentRound+1)}}
+if(currentRound===3&&allResultsEntered()){button.className="good";button.textContent="Finish Draft";return}if(currentRound>0&&currentRound<3&&allResultsEntered()){button.className="good";button.textContent="Generate Round "+(currentRound+1)}else if(currentRound===0){button.className="";button.textContent="Generate Round 1"}else if(currentRound<3){button.className="";button.textContent="Generate Round "+(currentRound+1)}}
 function generateNextRound(){
   if(draftMode==="team"){
     if(!seating.length){
@@ -331,9 +347,10 @@ function getPayoutForRecord(p){const k=p.wins+"-"+p.losses;if(k==="3-0")return m
 
 
 function initWagerControls(){
+  if(typeof wagerMode==="undefined")wagerMode="1v1";
   renderWagerPlayerOptions();
   renderWagerPlayerBOptions();
-  setWagerMode(wagerMode || "1v1");
+  setWagerMode(wagerMode);
 }
 
 function renderWagerPlayerBOptions(){
@@ -383,9 +400,11 @@ function setWagerMode(mode){
 
 function addSideWager(){
   const selectA=document.getElementById("wagerPlayerA");
+  const selectB=document.getElementById("wagerPlayerB");
   if(selectA && !selectA.options.length)initWagerControls();
+  if(selectB && !selectB.options.length)renderWagerPlayerBOptions();
+
   const a=document.getElementById("wagerPlayerA").value;
-  if(!document.getElementById("wagerPlayerB").options.length)renderWagerPlayerBOptions();
   const amount=Number(document.getElementById("wagerAmount").value||0);
   if(!a){warn("settlementCopy","Choose a player.");return}
   if(!amount||amount<=0){warn("settlementCopy","Enter a positive wager amount.");return}
@@ -1016,7 +1035,7 @@ function setWinner(matchId, winnerId) {
   updateRoundButtonState();
 }
 
-loadRegulars();setDraftMode(draftSize===6?'team':'ffa');renderSetup();
+loadRegulars();renderSetup();setDraftMode(draftSize===6?'team':'ffa');
 </script>
 </body>
 </html>
