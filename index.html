@@ -82,7 +82,7 @@
     <button id="wagerModeAll" class="sizeBtn" onclick="setWagerMode('all')">Player vs All</button>
   </div>
   <div class="wagerControls">
-    <div class="moneyInput"><label id="wagerPlayerALabel">Player A</label><select id="wagerPlayerA"></select></div>
+    <div class="moneyInput"><label id="wagerPlayerALabel">Player A</label><select id="wagerPlayerA" onchange="renderWagerPlayerBOptions()"></select></div>
     <div class="moneyInput" id="wagerPlayerBWrap"><label>Player B</label><select id="wagerPlayerB"></select></div>
     <div class="moneyInput"><label>Amount</label><input id="wagerAmount" type="number" value="1000" min="0" step="100"></div>
     <button onclick="addSideWager()" class="secondary">Add</button>
@@ -154,8 +154,8 @@ function toggleRegular(name){const count=selectedRegulars.length+guests.length;i
 function addGuest(){const input=document.getElementById("guestName");const name=input.value.trim();if(!name){warn("playerWarning","Enter guest name first.");return}const count=selectedRegulars.length+guests.length;if(count>=draftSize){warn("playerWarning",`You already selected ${draftSize} players. Remove someone first.`);return}const all=[...regulars,...guests].map(n=>n.toLowerCase());if(all.includes(name.toLowerCase())){warn("playerWarning","That name already exists.");return}guests.push(name);input.value="";document.getElementById("playerWarning").innerHTML="";renderSetup()}
 function removeGuest(index){guests.splice(index,1);renderSetup()}function clearSelection(){selectedRegulars=[];guests=[];document.getElementById("guestName").value="";document.getElementById("playerWarning").innerHTML="";renderSetup()}
 function shuffle(array){const arr=[...array];for(let i=arr.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]]}return arr}
-function startDraft(){setPostDraftResultsMode(false);const names=[...selectedRegulars,...guests];if(names.length!==draftSize){warn("playerWarning",`Select exactly ${draftSize} players.`);return}const unique=new Set(names.map(n=>n.toLowerCase()));if(unique.size!==names.length){warn("playerWarning","Player names must be unique.");return}localStorage.setItem("cubeDraftLastPlayers",JSON.stringify(names));players=names.map((name,index)=>({id:"p"+index,name,wins:0,losses:0,opponents:[]}));seating=[];teams={A:[],B:[]};rounds=[];currentRound=0;document.getElementById("seatingCard").style.display="block";document.getElementById("roundCard").style.display="block";document.getElementById("standingsCard").style.display="block";document.getElementById("wagerCard").style.display="block";renderWagerPlayerOptions();renderSideWagers();updateWagerModeVisibility();updateSettlementPreview();document.getElementById("currentRoundView").innerHTML="";document.getElementById("previousRoundsView").innerHTML="";document.getElementById("previousRoundsDetails").style.display="none";document.getElementById("roundNotice").innerHTML="";document.getElementById("seatingList").innerHTML="";document.getElementById("seatingCopy").innerHTML="";const rb=document.getElementById("roundButton");rb.disabled=false;rb.className="";rb.textContent="Generate Round 1";updateStandings();document.getElementById("seatingCard").scrollIntoView({behavior:"smooth",block:"start"})}
-function generateSeating(){seating=shuffle(players);assignTeamsFromSeating();const list=document.getElementById("seatingList");list.innerHTML="";seating.forEach(p=>{const li=document.createElement("li");li.textContent=p.name;list.appendChild(li)});document.getElementById("seatingCopy").innerHTML="";renderTeams()}
+function startDraft(){setPostDraftResultsMode(false);const names=[...selectedRegulars,...guests];if(names.length!==draftSize){warn("playerWarning",`Select exactly ${draftSize} players.`);return}const unique=new Set(names.map(n=>n.toLowerCase()));if(unique.size!==names.length){warn("playerWarning","Player names must be unique.");return}localStorage.setItem("cubeDraftLastPlayers",JSON.stringify(names));players=names.map((name,index)=>({id:"p"+index,name,wins:0,losses:0,opponents:[]}));seating=[];teams={A:[],B:[]};rounds=[];currentRound=0;document.getElementById("seatingCard").style.display="block";document.getElementById("roundCard").style.display="block";document.getElementById("standingsCard").style.display="block";document.getElementById("wagerCard").style.display="block";initWagerControls();renderSideWagers();updateWagerModeVisibility();updateSettlementPreview();document.getElementById("currentRoundView").innerHTML="";document.getElementById("previousRoundsView").innerHTML="";document.getElementById("previousRoundsDetails").style.display="none";document.getElementById("roundNotice").innerHTML="";document.getElementById("seatingList").innerHTML="";document.getElementById("seatingCopy").innerHTML="";const rb=document.getElementById("roundButton");rb.disabled=false;rb.className="";rb.textContent="Generate Round 1";updateStandings();document.getElementById("seatingCard").scrollIntoView({behavior:"smooth",block:"start"})}
+function generateSeating(){seating=shuffle(players);assignTeamsFromSeating();const list=document.getElementById("seatingList");list.innerHTML="";seating.forEach(p=>{const li=document.createElement("li");li.textContent=p.name;list.appendChild(li)});document.getElementById("seatingCopy").innerHTML="";renderTeams();initWagerControls()}
 function copyText(text,targetId){if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(text);success(targetId,"Copied.")}else{const box=document.createElement("textarea");box.value=text;document.body.appendChild(box);box.select();document.execCommand("copy");document.body.removeChild(box);success(targetId,"Copied.")}}
 function copySeating(){if(!seating.length){warn("seatingCopy","Generate seating first.");return}const text="Cube Draft Seating\n"+seating.map((p,i)=>`${i+1}. ${p.name}`).join("\n");copyText(text,"seatingCopy")}
 function havePlayed(a,b){return a.opponents.includes(b.id)}function scoreDistance(a,b){return Math.abs(a.wins-b.wins)+Math.abs(a.losses-b.losses)}
@@ -214,8 +214,49 @@ function updateStandings(){const body=document.getElementById("standingsBody");b
 function moneyValue(id){const v=Number(document.getElementById(id)?.value||0);return Number.isFinite(v)?v:0}
 function isDraftFinished(){return currentRound===3&&rounds[2]&&rounds[2].matches.every(m=>m.applied)}
 function getPayoutForRecord(p){const k=p.wins+"-"+p.losses;if(k==="3-0")return moneyValue("payout30");if(k==="2-1")return moneyValue("payout21");if(k==="1-2")return moneyValue("payout12");if(k==="0-3")return moneyValue("payout03");return 0}
-function renderWagerPlayerOptions(){const a=document.getElementById("wagerPlayerA"),b=document.getElementById("wagerPlayerB");if(!a||!b)return;a.innerHTML="";b.innerHTML="";players.forEach(p=>{const oa=document.createElement("option");oa.value=p.id;oa.textContent=p.name;a.appendChild(oa);const ob=document.createElement("option");ob.value=p.id;ob.textContent=p.name;b.appendChild(ob)});if(players.length>1)b.selectedIndex=1;setWagerMode(wagerMode)}
 
+
+function initWagerControls(){
+  renderWagerPlayerOptions();
+  renderWagerPlayerBOptions();
+  setWagerMode(wagerMode || "1v1");
+}
+
+function renderWagerPlayerBOptions(){
+  const selectA=document.getElementById("wagerPlayerA");
+  const selectB=document.getElementById("wagerPlayerB");
+  if(!selectA||!selectB)return;
+  const selectedA=selectA.value;
+  const previousB=selectB.value;
+  selectB.innerHTML="";
+  players.filter(p=>p.id!==selectedA).forEach(p=>{
+    const option=document.createElement("option");
+    option.value=p.id;
+    option.textContent=p.name;
+    selectB.appendChild(option);
+  });
+  if(previousB&&previousB!==selectedA&&players.some(p=>p.id===previousB)){
+    selectB.value=previousB;
+  }
+}
+
+function renderWagerPlayerOptions(){
+  const selectA=document.getElementById("wagerPlayerA");
+  if(!selectA)return;
+  const previousA=selectA.value;
+  selectA.innerHTML="";
+  players.forEach(p=>{
+    const option=document.createElement("option");
+    option.value=p.id;
+    option.textContent=p.name;
+    selectA.appendChild(option);
+  });
+  if(previousA&&players.some(p=>p.id===previousA)){
+    selectA.value=previousA;
+  }
+  renderWagerPlayerBOptions();
+  setWagerMode(wagerMode);
+}
 function setWagerMode(mode){
   wagerMode=mode;
   const one=document.getElementById("wagerMode1v1"),all=document.getElementById("wagerModeAll");
@@ -226,7 +267,7 @@ function setWagerMode(mode){
   if(alabel)alabel.textContent=mode==="all"?"Player":"Player A";
 }
 
-function addSideWager(){
+function addSideWager(){renderWagerPlayerBOptions();
   const a=document.getElementById("wagerPlayerA").value;
   const amount=Number(document.getElementById("wagerAmount").value||0);
   if(!a){warn("settlementCopy","Choose a player.");return}
