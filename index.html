@@ -88,6 +88,56 @@
   margin-left:6px;
 }
 
+
+.teamScoreBanner{
+  border:1px solid var(--border);
+  background:#f9fafb;
+  border-radius:12px;
+  padding:10px;
+  margin:8px 0 12px;
+  font-weight:900;
+  font-size:17px;
+}
+.teamPlayerGroup{
+  border:1px solid var(--border);
+  border-radius:14px;
+  padding:10px;
+  margin:10px 0;
+  background:#fff;
+}
+.teamPlayerName{
+  font-weight:900;
+  margin-bottom:8px;
+}
+.teamMiniMatch{
+  border-top:1px solid var(--border);
+  padding:9px 0;
+}
+.teamMiniMatch:first-of-type{border-top:none}
+.teamMiniTitle{
+  color:var(--muted);
+  font-size:14px;
+  font-weight:800;
+  margin-bottom:6px;
+}
+.teamWinnerGrid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:6px;
+}
+.resultLine{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:8px;
+  padding:8px 0;
+  border-bottom:1px solid var(--border);
+}
+.resultLine:last-child{border-bottom:none}
+@media(max-width:560px){
+  .teamWinnerGrid{grid-template-columns:1fr}
+}
+
 </style>
 </head>
 <body>
@@ -665,24 +715,125 @@ function renderRounds(){
   document.getElementById("previousRoundsDetails").style.display=rounds.length>1&&draftMode!=="team"?"block":"none";
 }
 
+
+function teamLiveScore(){
+  let a=0,b=0;
+  rounds.forEach(round=>{
+    if(!round.teamMode)return;
+    round.matches.forEach(match=>{
+      if(!match.winner)return;
+      const winnerTeam=teamOfPlayer(match.winner);
+      if(winnerTeam==="A")a++;
+      if(winnerTeam==="B")b++;
+    });
+  });
+  return {A:a,B:b};
+}
+
+function renderTeamRoundBlock(round){
+  const div=document.createElement("div");
+  const score=teamLiveScore();
+
+  div.innerHTML=`
+    <h3>Team matches<span class="pill">team draft</span></h3>
+    <div class="teamScoreBanner">Team score: Team A ${score.A} - ${score.B} Team B</div>
+  `;
+
+  const unfinished=round.matches.filter(m=>!m.winner);
+  const completed=round.matches.filter(m=>m.winner);
+
+  if(unfinished.length){
+    const title=document.createElement("h3");
+    title.textContent="Unfinished matches";
+    div.appendChild(title);
+
+    const teamAPlayers=teams.A.map(id=>players.find(p=>p.id===id)).filter(Boolean);
+
+    teamAPlayers.forEach(teamAPlayer=>{
+      const playerMatches=unfinished.filter(m=>m.playerA===teamAPlayer.id||m.playerB===teamAPlayer.id);
+      if(!playerMatches.length)return;
+
+      const group=document.createElement("div");
+      group.className="teamPlayerGroup";
+      group.innerHTML=`<div class="teamPlayerName">${teamAPlayer.name}<span class="teamBadge">Team A</span></div>`;
+
+      playerMatches.forEach(match=>{
+        const a=players.find(p=>p.id===match.playerA);
+        const b=players.find(p=>p.id===match.playerB);
+        const opponent=a.id===teamAPlayer.id?b:a;
+
+        const mini=document.createElement("div");
+        mini.className="teamMiniMatch";
+        mini.innerHTML=`
+          <div class="teamMiniTitle">vs ${opponent.name}</div>
+          <div class="teamWinnerGrid">
+            <button class="winnerBtn" onclick="setWinner('${match.id}','${teamAPlayer.id}')">
+              <span>${teamAPlayer.name} won</span><span></span>
+            </button>
+            <button class="winnerBtn" onclick="setWinner('${match.id}','${opponent.id}')">
+              <span>${opponent.name} won</span><span></span>
+            </button>
+          </div>
+        `;
+        group.appendChild(mini);
+      });
+
+      div.appendChild(group);
+    });
+  }else{
+    const done=document.createElement("div");
+    done.className="success";
+    done.textContent="All team match results are entered. Finish the team draft to calculate settlements.";
+    div.appendChild(done);
+  }
+
+  if(completed.length){
+    const details=document.createElement("details");
+    details.innerHTML=`<summary>Completed results / change result (${completed.length})</summary>`;
+
+    completed.forEach(match=>{
+      const winner=players.find(p=>p.id===match.winner);
+      const loserId=match.winner===match.playerA?match.playerB:match.playerA;
+      const loser=players.find(p=>p.id===loserId);
+      const locked=document.getElementById("roundButton").disabled||match.applied;
+
+      const line=document.createElement("div");
+      line.className="resultLine";
+      line.innerHTML=`
+        <span><strong>${winner.name}</strong> beat ${loser.name}</span>
+        ${locked?'<span class="small">locked</span>':`<button class="secondary miniBtn" onclick="changeMatchResult('${match.id}')">Change result</button>`}
+      `;
+      details.appendChild(line);
+    });
+
+    div.appendChild(details);
+  }
+
+  return div;
+}
+
+
 function renderRoundBlock(round,oldRound){
+  if(round.teamMode)return renderTeamRoundBlock(round);
+
   const div=document.createElement("div");
   div.className=oldRound?"oldRound":"";
-  div.innerHTML=round.teamMode?`<h3>Team matches<span class="pill">team draft</span></h3>`:`<h3>Round ${round.round}<span class="pill">${roundLabel(round.round)}</span></h3>`;
+  div.innerHTML=`<h3>Round ${round.round}<span class="pill">${roundLabel(round.round)}</span></h3>`;
 
   round.matches.forEach((match,idx)=>{
     const a=players.find(p=>p.id===match.playerA);
     const b=players.find(p=>p.id===match.playerB);
-    const rematch=a.opponents.includes(b.id)&&!match.applied&&!round.teamMode;
+    const rematch=a.opponents.includes(b.id)&&!match.applied;
 
     const matchDiv=document.createElement("div");
     matchDiv.className="matchCard";
 
     const locked=match.applied||document.getElementById("roundButton").disabled;
+
     matchDiv.innerHTML=`
       <div class="matchHeader">
         <strong>Match ${idx+1}</strong>
-        <span>${match.playerARecord} vs ${match.playerBRecord}${rematch?" · REMATCH ERROR":""}</span>
+        <span>${match.playerARecord||a.wins+"-"+a.losses} vs ${match.playerBRecord||b.wins+"-"+b.losses}${rematch?" · REMATCH ERROR":""}</span>
       </div>
       <div class="winnerButtons">
         ${winnerButtonHtml(match,a,locked)}
@@ -711,6 +862,36 @@ function roundLabel(round){
   return "final Swiss";
 }
 
+
+function changeMatchResult(matchId){
+  for(const round of rounds){
+    const match=round.matches.find(m=>m.id===matchId);
+    if(!match)continue;
+
+    if(match.applied){
+      const a=players.find(p=>p.id===match.playerA);
+      const b=players.find(p=>p.id===match.playerB);
+      const winner=players.find(p=>p.id===match.winner);
+      const loser=winner&&winner.id===a.id?b:a;
+
+      if(winner&&loser){
+        winner.wins=Math.max(0,winner.wins-1);
+        loser.losses=Math.max(0,loser.losses-1);
+        a.opponents=a.opponents.filter(id=>id!==b.id);
+        b.opponents=b.opponents.filter(id=>id!==a.id);
+      }
+
+      match.applied=false;
+    }
+
+    match.winner=null;
+    renderRounds();
+    updateRoundButtonState();
+    updateStandings();
+    return;
+  }
+}
+
 function setWinner(matchId,winnerId){
   for(const round of rounds){
     const match=round.matches.find(m=>m.id===matchId);
@@ -721,6 +902,7 @@ function setWinner(matchId,winnerId){
   }
   renderRounds();
   updateRoundButtonState();
+  updateStandings();
 }
 
 
@@ -729,7 +911,7 @@ function teamMatchScore(){
   rounds.forEach(round=>{
     if(!round.teamMode)return;
     round.matches.forEach(match=>{
-      if(!match.applied)return;
+      if(!match.winner)return;
       const winnerTeam=teamOfPlayer(match.winner);
       if(winnerTeam==="A")a++;
       if(winnerTeam==="B")b++;
