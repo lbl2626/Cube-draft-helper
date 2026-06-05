@@ -1420,6 +1420,42 @@ function exportSingleDraft(draftId){
   copyText(JSON.stringify(payload,null,2),"historyNotice");
 }
 
+
+function shareSingleDraft(draftId){
+  const draft=draftHistory.find(d=>d.draftId===draftId);
+  if(!draft){
+    warn("historyNotice","Draft not found.");
+    return;
+  }
+
+  const payload={
+    exportType:"singleDraft",
+    exportedAt:new Date().toISOString(),
+    draft
+  };
+
+  const text=JSON.stringify(payload,null,2);
+  const title="Cube Draft Export";
+  const dateLabel=formatDateShort(draft.date);
+  const formatLabel=draft.format==="team"?"Team draft":"Free-for-all";
+
+  if(navigator.share){
+    navigator.share({
+      title,
+      text:`Cube Draft Export\n${dateLabel} · ${formatLabel} · ${draft.players.length} players\n\n${text}`
+    }).then(()=>{
+      success("historyNotice","Share sheet opened.");
+    }).catch(()=>{
+      warn("historyNotice","Share cancelled or unavailable. Export text copied instead.");
+      copyText(text,"historyNotice");
+    });
+  }else{
+    copyText(text,"historyNotice");
+    warn("historyNotice","Sharing is not supported in this browser, so export text was copied instead.");
+  }
+}
+
+
 function exportAllHistory(){
   const payload={
     exportType:"cubeDraftHistoryBackup",
@@ -1624,7 +1660,7 @@ function renderDraftHistoryList(){
       </div>
       <div class="small" style="margin-top:6px;">${playersText}</div>
       <div class="historyActions">
-        <button class="secondary miniBtn" onclick="exportSingleDraft('${draft.draftId}')">Export draft</button>
+        <button class="secondary miniBtn" onclick="exportSingleDraft('${draft.draftId}')">Export draft</button><button class="secondary miniBtn" onclick="shareSingleDraft('${draft.draftId}')">Share draft</button>
         <button class="danger miniBtn" onclick="deleteDraftFromHistory('${draft.draftId}')">Delete</button>
       </div>
     `;
