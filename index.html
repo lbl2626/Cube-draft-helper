@@ -188,10 +188,40 @@
   .historyActions{display:block}
 }
 
+
+.appVersion{
+  display:inline-block;
+  vertical-align:middle;
+  margin-left:8px;
+  padding:3px 8px;
+  border-radius:999px;
+  background:#eef2ff;
+  color:#3730a3;
+  font-size:13px;
+  font-weight:800;
+}
+
+
+#basicStatsDetails{
+  border:1px solid var(--border);
+  background:#f9fafb;
+  border-radius:12px;
+  padding:10px;
+  margin:12px 0;
+}
+#basicStatsDetails summary{
+  cursor:pointer;
+  font-weight:900;
+  color:var(--secondary);
+}
+#basicStatsDetails[open] summary{
+  margin-bottom:8px;
+}
+
 </style>
 </head>
 <body>
-  <h1>Cube Draft Helper</h1>
+  <h1>Cube Draft Helper <span class="appVersion">v16.3</span></h1>
   <p class="sub">Select players, generate seating, run free-for-all Swiss or team draft matches, and track settlements.</p>
 
   <div id="postDraftReveal" class="postDraftReveal" style="display:none;">
@@ -329,8 +359,10 @@
       </div>
     </div>
 
-    <h3>Basic Stats</h3>
-    <div id="statsSummary"></div>
+    <details id="basicStatsDetails">
+      <summary>Basic Stats</summary>
+      <div id="statsSummary"></div>
+    </details>
 
     <h3>Draft History</h3>
     <div id="draftHistoryList"></div>
