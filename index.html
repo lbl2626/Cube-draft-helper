@@ -1541,7 +1541,7 @@ function shareSingleDraft(draftId){
   if(navigator.share){
     navigator.share({
       title,
-      text:`Cube Draft Export\n${dateLabel} · ${formatLabel} · ${draft.players.length} players\n\n${text}`
+      text:`Cube Draft Export\n${dateLabel} · ${formatLabel} · ${draft.players.length} players\n\n--- BEGIN JSON ---\n${text}\n--- END JSON ---`
     }).then(()=>{
       success("historyNotice","Share sheet opened.");
     }).catch(()=>{
@@ -1616,6 +1616,28 @@ function normalizeImportedDraft(draft){
   };
 }
 
+
+function parsePossiblyWrappedJson(text){
+  const trimmed=text.trim();
+
+  try{
+    return JSON.parse(trimmed);
+  }catch(e){
+    // Continue to wrapped-text extraction.
+  }
+
+  const first=trimmed.indexOf("{");
+  const last=trimmed.lastIndexOf("}");
+
+  if(first===-1||last===-1||last<=first){
+    throw new Error("No JSON object found.");
+  }
+
+  const candidate=trimmed.slice(first,last+1);
+  return JSON.parse(candidate);
+}
+
+
 function importHistoryText(){
   const text=document.getElementById("importText").value.trim();
   if(!text){
@@ -1625,9 +1647,9 @@ function importHistoryText(){
 
   let payload;
   try{
-    payload=JSON.parse(text);
+    payload=parsePossiblyWrappedJson(text);
   }catch(e){
-    warn("historyNotice","Import failed: this is not valid JSON.");
+    warn("historyNotice","Import failed: no valid JSON export found in pasted text.");
     return;
   }
 
