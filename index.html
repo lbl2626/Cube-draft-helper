@@ -309,7 +309,7 @@
 
   <div class="card" id="historyCard">
     <h2>History & Stats</h2>
-    <p class="small">Completed drafts are stored locally on this device. Export/import lets you back up data or import drafts organized by someone else.</p>
+    <p class="small">Completed drafts are stored locally on this device. Export/import lets you back up data or import drafts organized by someone else. Saved drafts include detailed money breakdowns for future stats.</p>
 
     <div class="actions">
       <button onclick="saveCompletedDraftManually()" class="good">Save Completed Draft</button>
@@ -1195,56 +1195,34 @@ function compareFinalRecord(a,b){
 }
 
 function calculateSettlements(){
-  const entry=moneyValue("entryFee");
   const finished=isDraftFinished();
   const balances={};
   const wagerLines=[];
 
   players.forEach(p=>{
-    let base=0;
-    if(finished){
-      if(draftMode==="team"){
-        const wager=moneyValue("teamWager");
-        const aWins=teamWins(teams.A);
-        const bWins=teamWins(teams.B);
-        const playerTeam=teamOfPlayer(p.id);
-        if(aWins!==bWins){
-          const winningTeam=aWins>bWins?"A":"B";
-          base=playerTeam===winningTeam?wager:-wager;
-        }
-      }else{
-        base=getPayoutForRecord(p)-entry;
-      }
-    }else{
-      base=draftMode==="team"?0:-entry;
-    }
-    balances[p.id]=base;
+    balances[p.id]=draftMode==="team"?0:-moneyValue("entryFee");
   });
 
   if(finished){
+    const money=calculateMoneyBreakdown();
+    players.forEach(p=>{
+      balances[p.id]=money.breakdown[p.id]?.totalNet||0;
+    });
+
     if(draftMode==="team"){
-      const aWins=teamWins(teams.A);
-      const bWins=teamWins(teams.B);
-      if(aWins===bWins)wagerLines.push("Team draft: void, tied team score");
-      else wagerLines.push(`Team draft: Team ${aWins>bWins?"A":"B"} wins ${moneyValue("teamWager")} CZK per player`);
+      const result=teamResultExport();
+      if(result){
+        if(!result.winner)wagerLines.push("Team draft: void, tied team score");
+        else wagerLines.push(`Team draft: Team ${result.winner} wins ${moneyValue("teamWager")} CZK per player`);
+      }
     }
 
-    sideWagers.forEach(w=>{
-      const a=players.find(p=>p.id===w.playerA);
-      const b=players.find(p=>p.id===w.playerB);
-      if(!a||!b)return;
-
-      const cmp=compareFinalRecord(a,b);
-      if(cmp===0){
-        wagerLines.push(`${a.name} vs ${b.name}: void, same record`);
-        return;
+    money.sideWagerResults.forEach(r=>{
+      if(r.void){
+        wagerLines.push(`${r.playerA} vs ${r.playerB}: void, ${r.reason}`);
+      }else{
+        wagerLines.push(`${r.winner} wins ${r.amount} CZK from ${r.loser}`);
       }
-
-      const winner=cmp>0?a:b;
-      const loser=cmp>0?b:a;
-      balances[winner.id]+=w.amount;
-      balances[loser.id]-=w.amount;
-      wagerLines.push(`${winner.name} wins ${w.amount} CZK from ${loser.name}`);
     });
   }
 
@@ -1329,30 +1307,147 @@ function saveDraftHistory(){
   localStorage.setItem("cubeDraftHistory",JSON.stringify(draftHistory));
 }
 
+function calculateMoneyBreakdown(){
+  const breakdown={};
+  const sideWagerResults=[];
+  const finished=isDraftFinished();
+
+  players.forEach(p=>{
+    breakdown[p.id]={
+      playerId:p.id,
+      name:p.name,
+      prizeNet:0,
+      teamNet:0,
+      sideWagerNet:0,
+      totalNet:0
+    };
+  });
+
+  if(!finished){
+    return {breakdown,sideWagerResults};
+  }
+
+  if(draftMode==="team"){
+    const wager=moneyValue("teamWager");
+    const aWins=teamWins(teams.A);
+    const bWins=teamWins(teams.B);
+
+    if(aWins!==bWins){
+      const winningTeam=aWins>bWins?"A":"B";
+      players.forEach(p=>{
+        const playerTeam=teamOfPlayer(p.id);
+        breakdown[p.id].teamNet=playerTeam===winningTeam?wager:-wager;
+      });
+    }
+  }else{
+    const entry=moneyValue("entryFee");
+    players.forEach(p=>{
+      breakdown[p.id].prizeNet=getPayoutForRecord(p)-entry;
+    });
+  }
+
+  sideWagers.forEach(w=>{
+    const a=players.find(p=>p.id===w.playerA);
+    const b=players.find(p=>p.id===w.playerB);
+    if(!a||!b)return;
+
+    const cmp=compareFinalRecord(a,b);
+    if(cmp===0){
+      sideWagerResults.push({
+        playerA:a.name,
+        playerB:b.name,
+        amount:w.amount,
+        winner:"",
+        loser:"",
+        void:true,
+        reason:"same record",
+        group:w.group||""
+      });
+      return;
+    }
+
+    const winner=cmp>0?a:b;
+    const loser=cmp>0?b:a;
+
+    breakdown[winner.id].sideWagerNet+=w.amount;
+    breakdown[loser.id].sideWagerNet-=w.amount;
+
+    sideWagerResults.push({
+      playerA:a.name,
+      playerB:b.name,
+      amount:w.amount,
+      winner:winner.name,
+      loser:loser.name,
+      void:false,
+      reason:"",
+      group:w.group||""
+    });
+  });
+
+  players.forEach(p=>{
+    const b=breakdown[p.id];
+    b.totalNet=b.prizeNet+b.teamNet+b.sideWagerNet;
+  });
+
+  return {breakdown,sideWagerResults};
+}
+
+function teamResultExport(){
+  if(draftMode!=="team")return null;
+  const aWins=teamWins(teams.A);
+  const bWins=teamWins(teams.B);
+  let winner="";
+  if(aWins>bWins)winner="A";
+  if(bWins>aWins)winner="B";
+  return {
+    teamAWins:aWins,
+    teamBWins:bWins,
+    winner,
+    teamA:teams.A.map(id=>players.find(p=>p.id===id)?.name).filter(Boolean),
+    teamB:teams.B.map(id=>players.find(p=>p.id===id)?.name).filter(Boolean)
+  };
+}
+
 function makeDraftExport(){
   if(!isDraftFinished())return null;
 
+  const money=calculateMoneyBreakdown();
   const settlement=calculateSettlements();
   const draftId="draft_"+new Date().toISOString()+"_"+Math.random().toString(36).slice(2,8);
 
   return {
-    schemaVersion:1,
+    schemaVersion:2,
     draftId,
     date:new Date().toISOString(),
     format:draftMode,
     draftSize,
+    settings:{
+      entryFee:moneyValue("entryFee"),
+      payout30:moneyValue("payout30"),
+      payout21:moneyValue("payout21"),
+      payout12:moneyValue("payout12"),
+      payout03:moneyValue("payout03"),
+      teamWager:moneyValue("teamWager")
+    },
     players:players.map(p=>({
       id:p.id,
       name:p.name,
       wins:p.wins,
       losses:p.losses,
       team:draftMode==="team"?teamOfPlayer(p.id):"",
-      moneyNet:settlement.balances[p.id]||0
+      moneyNet:money.breakdown[p.id]?.totalNet||0,
+      money:{
+        prizeNet:money.breakdown[p.id]?.prizeNet||0,
+        teamNet:money.breakdown[p.id]?.teamNet||0,
+        sideWagerNet:money.breakdown[p.id]?.sideWagerNet||0,
+        totalNet:money.breakdown[p.id]?.totalNet||0
+      }
     })),
     teams:{
       A:teams.A.map(id=>players.find(p=>p.id===id)?.name).filter(Boolean),
       B:teams.B.map(id=>players.find(p=>p.id===id)?.name).filter(Boolean)
     },
+    teamResult:teamResultExport(),
     matches:rounds.flatMap(round=>round.matches.map(match=>{
       const a=players.find(p=>p.id===match.playerA);
       const b=players.find(p=>p.id===match.playerB);
@@ -1362,7 +1457,10 @@ function makeDraftExport(){
         teamMode:!!round.teamMode,
         playerA:a?.name||"",
         playerB:b?.name||"",
-        winner:winner?.name||""
+        winner:winner?.name||"",
+        loser:winner?(winner.id===match.playerA?b?.name||"":a?.name||""):"",
+        playerATeam:draftMode==="team"?teamOfPlayer(match.playerA):"",
+        playerBTeam:draftMode==="team"?teamOfPlayer(match.playerB):""
       };
     })),
     sideWagers:sideWagers.map(w=>{
@@ -1375,6 +1473,7 @@ function makeDraftExport(){
         group:w.group||""
       };
     }),
+    sideWagerResults:money.sideWagerResults,
     settlementLines:settlement.wagerLines||[]
   };
 }
@@ -1481,23 +1580,38 @@ function normalizeImportedDraft(draft){
     date:draft.date||new Date().toISOString(),
     format:draft.format||"ffa",
     draftSize:draft.draftSize||draft.players.length||0,
-    players:draft.players.map(p=>({
-      id:p.id||p.name,
-      name:p.name,
-      wins:Number(p.wins||0),
-      losses:Number(p.losses||0),
-      team:p.team||"",
-      moneyNet:Number(p.moneyNet||0)
-    })),
+    settings:draft.settings||{},
+    players:draft.players.map(p=>{
+      const totalNet=Number(p.money?.totalNet ?? p.moneyNet ?? 0);
+      return {
+        id:p.id||p.name,
+        name:p.name,
+        wins:Number(p.wins||0),
+        losses:Number(p.losses||0),
+        team:p.team||"",
+        moneyNet:totalNet,
+        money:{
+          prizeNet:Number(p.money?.prizeNet||0),
+          teamNet:Number(p.money?.teamNet||0),
+          sideWagerNet:Number(p.money?.sideWagerNet||0),
+          totalNet
+        }
+      };
+    }),
     teams:draft.teams||{A:[],B:[]},
+    teamResult:draft.teamResult||null,
     matches:draft.matches.map(m=>({
       round:m.round||1,
       teamMode:!!m.teamMode,
       playerA:m.playerA||"",
       playerB:m.playerB||"",
-      winner:m.winner||""
+      winner:m.winner||"",
+      loser:m.loser||"",
+      playerATeam:m.playerATeam||"",
+      playerBTeam:m.playerBTeam||""
     })),
     sideWagers:Array.isArray(draft.sideWagers)?draft.sideWagers:[],
+    sideWagerResults:Array.isArray(draft.sideWagerResults)?draft.sideWagerResults:[],
     settlementLines:Array.isArray(draft.settlementLines)?draft.settlementLines:[]
   };
 }
@@ -1582,12 +1696,29 @@ function computeBasicStats(){
   draftHistory.forEach(draft=>{
     draft.players.forEach(p=>{
       if(!stats[p.name]){
-        stats[p.name]={name:p.name,drafts:0,wins:0,losses:0,moneyNet:0};
+        stats[p.name]={
+          name:p.name,
+          drafts:0,
+          wins:0,
+          losses:0,
+          moneyNet:0,
+          prizeNet:0,
+          teamNet:0,
+          sideWagerNet:0,
+          ffaDrafts:0,
+          teamDrafts:0
+        };
       }
-      stats[p.name].drafts++;
-      stats[p.name].wins+=Number(p.wins||0);
-      stats[p.name].losses+=Number(p.losses||0);
-      stats[p.name].moneyNet+=Number(p.moneyNet||0);
+      const s=stats[p.name];
+      s.drafts++;
+      if(draft.format==="team")s.teamDrafts++;
+      else s.ffaDrafts++;
+      s.wins+=Number(p.wins||0);
+      s.losses+=Number(p.losses||0);
+      s.moneyNet+=Number(p.money?.totalNet ?? p.moneyNet ?? 0);
+      s.prizeNet+=Number(p.money?.prizeNet||0);
+      s.teamNet+=Number(p.money?.teamNet||0);
+      s.sideWagerNet+=Number(p.money?.sideWagerNet||0);
     });
   });
 
@@ -1621,6 +1752,9 @@ function renderStatsSummary(){
     const winPct=matches?((s.wins/matches)*100).toFixed(1):"0.0";
     const sign=s.moneyNet>0?"+":"";
     const moneyClass=s.moneyNet>=0?"positive":"negative";
+    const prizeTeam=s.prizeNet+s.teamNet;
+    const prizeTeamSign=prizeTeam>0?"+":"";
+    const sideSign=s.sideWagerNet>0?"+":"";
 
     html+=`
       <div class="statCard">
@@ -1629,6 +1763,8 @@ function renderStatsSummary(){
         <div class="statLine"><span>Match record</span><strong>${s.wins}-${s.losses}</strong></div>
         <div class="statLine"><span>Win %</span><strong>${winPct}%</strong></div>
         <div class="statLine"><span>Money net</span><strong class="${moneyClass}">${sign}${s.moneyNet} CZK</strong></div>
+        <div class="statLine"><span>Prize/team</span><strong>${prizeTeamSign}${prizeTeam} CZK</strong></div>
+        <div class="statLine"><span>Side wagers</span><strong>${sideSign}${s.sideWagerNet} CZK</strong></div>
       </div>
     `;
   });
