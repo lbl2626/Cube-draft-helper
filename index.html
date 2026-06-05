@@ -138,6 +138,56 @@
   .teamWinnerGrid{grid-template-columns:1fr}
 }
 
+
+.historyDraft{
+  border:1px solid var(--border);
+  background:#f9fafb;
+  border-radius:12px;
+  padding:10px;
+  margin:8px 0;
+}
+.historyHeader{
+  display:flex;
+  justify-content:space-between;
+  gap:8px;
+  align-items:center;
+  font-weight:900;
+}
+.historyActions{
+  display:flex;
+  gap:6px;
+  flex-wrap:wrap;
+  margin-top:8px;
+}
+.statsGrid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
+  gap:8px;
+  margin-top:8px;
+}
+.statCard{
+  border:1px solid var(--border);
+  background:#f9fafb;
+  border-radius:12px;
+  padding:10px;
+}
+.statName{font-weight:900;margin-bottom:4px}
+.statLine{display:flex;justify-content:space-between;gap:8px;border-top:1px solid var(--border);padding:5px 0}
+.statLine:first-of-type{border-top:none}
+.importBox{
+  width:100%;
+  min-height:110px;
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:10px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
+  font-size:13px;
+}
+@media(max-width:560px){
+  .historyHeader{display:block}
+  .historyActions{display:block}
+}
+
 </style>
 </head>
 <body>
@@ -257,6 +307,36 @@
     </table>
   </div>
 
+  <div class="card" id="historyCard">
+    <h2>History & Stats</h2>
+    <p class="small">Completed drafts are stored locally on this device. Export/import lets you back up data or import drafts organized by someone else.</p>
+
+    <div class="actions">
+      <button onclick="saveCompletedDraftManually()" class="good">Save Completed Draft</button>
+      <button onclick="exportAllHistory()" class="secondary">Export All Backup</button>
+      <button onclick="toggleImportBox()" class="secondary">Import Draft / Backup</button>
+      <button onclick="clearDraftHistory()" class="danger">Clear History</button>
+    </div>
+    <div id="historyNotice"></div>
+
+    <div id="importArea" style="display:none;">
+      <h3>Import</h3>
+      <p class="small">Paste an exported single draft or full backup here.</p>
+      <textarea id="importText" class="importBox" placeholder="Paste export here"></textarea>
+      <div class="actions">
+        <button onclick="importHistoryText()" class="good">Import</button>
+        <button onclick="toggleImportBox()" class="secondary">Cancel</button>
+      </div>
+    </div>
+
+    <h3>Basic Stats</h3>
+    <div id="statsSummary"></div>
+
+    <h3>Draft History</h3>
+    <div id="draftHistoryList"></div>
+  </div>
+
+
 <script>
 const DEFAULT_REGULARS=["Bertík","Flochy","René","Zubař","KK","Batrs","Stráča","Slávek","Vít Vávra","Vítek Říman","Buky"];
 
@@ -273,6 +353,8 @@ let rounds=[];
 let currentRound=0;
 let sideWagers=[];
 let wagerMode="1v1";
+let draftHistory=[];
+let currentDraftSaved=false;
 
 function loadRegulars(){
   const saved=localStorage.getItem("cubeDraftRegulars");
@@ -411,6 +493,7 @@ function startDraft(){
   rounds=[];
   currentRound=0;
   sideWagers=[];
+  currentDraftSaved=false;
 
   ["seatingCard","roundCard","standingsCard","wagerCard"].forEach(id=>document.getElementById(id).style.display="block");
   ["currentRoundView","previousRoundsView","roundNotice","seatingList","teamDisplay","noPlayDisplay","seatingCopy","playerWarning","settlementCopy"].forEach(id=>{
@@ -630,6 +713,7 @@ function generateNextRound(){
     button.textContent="Team Draft Finished";
     renderRounds();
     updateStandings();
+    autoSaveCompletedDraftIfNeeded();
     setPostDraftResultsMode(true);
     scrollToSettlementsSoon();
     return;
@@ -695,6 +779,7 @@ function finishIfNeeded(){
     button.textContent="Draft Finished";
     renderRounds();
     updateStandings();
+    autoSaveCompletedDraftIfNeeded();
     setPostDraftResultsMode(true);
     scrollToSettlementsSoon();
   }
@@ -1229,6 +1314,330 @@ function copySettlements(){
   copyText(settlementText(),"settlementCopy");
 }
 
+
+function loadDraftHistory(){
+  const saved=localStorage.getItem("cubeDraftHistory");
+  try{
+    draftHistory=saved?JSON.parse(saved):[];
+    if(!Array.isArray(draftHistory))draftHistory=[];
+  }catch(e){
+    draftHistory=[];
+  }
+}
+
+function saveDraftHistory(){
+  localStorage.setItem("cubeDraftHistory",JSON.stringify(draftHistory));
+}
+
+function makeDraftExport(){
+  if(!isDraftFinished())return null;
+
+  const settlement=calculateSettlements();
+  const draftId="draft_"+new Date().toISOString()+"_"+Math.random().toString(36).slice(2,8);
+
+  return {
+    schemaVersion:1,
+    draftId,
+    date:new Date().toISOString(),
+    format:draftMode,
+    draftSize,
+    players:players.map(p=>({
+      id:p.id,
+      name:p.name,
+      wins:p.wins,
+      losses:p.losses,
+      team:draftMode==="team"?teamOfPlayer(p.id):"",
+      moneyNet:settlement.balances[p.id]||0
+    })),
+    teams:{
+      A:teams.A.map(id=>players.find(p=>p.id===id)?.name).filter(Boolean),
+      B:teams.B.map(id=>players.find(p=>p.id===id)?.name).filter(Boolean)
+    },
+    matches:rounds.flatMap(round=>round.matches.map(match=>{
+      const a=players.find(p=>p.id===match.playerA);
+      const b=players.find(p=>p.id===match.playerB);
+      const winner=players.find(p=>p.id===match.winner);
+      return {
+        round:round.round,
+        teamMode:!!round.teamMode,
+        playerA:a?.name||"",
+        playerB:b?.name||"",
+        winner:winner?.name||""
+      };
+    })),
+    sideWagers:sideWagers.map(w=>{
+      const a=players.find(p=>p.id===w.playerA);
+      const b=players.find(p=>p.id===w.playerB);
+      return {
+        playerA:a?.name||"",
+        playerB:b?.name||"",
+        amount:w.amount,
+        group:w.group||""
+      };
+    }),
+    settlementLines:settlement.wagerLines||[]
+  };
+}
+
+function saveCompletedDraft(){
+  const draft=makeDraftExport();
+  if(!draft)return {ok:false,message:"Draft is not finished yet."};
+
+  draftHistory.push(draft);
+  currentDraftSaved=true;
+  saveDraftHistory();
+  renderHistoryAndStats();
+  return {ok:true,message:"Draft saved to local history."};
+}
+
+function saveCompletedDraftManually(){
+  const result=saveCompletedDraft();
+  if(result.ok)success("historyNotice",result.message);
+  else warn("historyNotice",result.message);
+}
+
+function autoSaveCompletedDraftIfNeeded(){
+  if(currentDraftSaved)return;
+  if(!isDraftFinished())return;
+
+  const result=saveCompletedDraft();
+  if(result.ok)success("historyNotice","Draft auto-saved to local history.");
+}
+
+function exportSingleDraft(draftId){
+  const draft=draftHistory.find(d=>d.draftId===draftId);
+  if(!draft){
+    warn("historyNotice","Draft not found.");
+    return;
+  }
+
+  const payload={
+    exportType:"singleDraft",
+    exportedAt:new Date().toISOString(),
+    draft
+  };
+
+  copyText(JSON.stringify(payload,null,2),"historyNotice");
+}
+
+function exportAllHistory(){
+  const payload={
+    exportType:"cubeDraftHistoryBackup",
+    exportedAt:new Date().toISOString(),
+    drafts:draftHistory
+  };
+
+  copyText(JSON.stringify(payload,null,2),"historyNotice");
+}
+
+function toggleImportBox(){
+  const area=document.getElementById("importArea");
+  if(!area)return;
+  area.style.display=area.style.display==="none"?"block":"none";
+}
+
+function normalizeImportedDraft(draft){
+  if(!draft||!draft.draftId||!Array.isArray(draft.players)||!Array.isArray(draft.matches))return null;
+
+  return {
+    schemaVersion:draft.schemaVersion||1,
+    draftId:draft.draftId,
+    date:draft.date||new Date().toISOString(),
+    format:draft.format||"ffa",
+    draftSize:draft.draftSize||draft.players.length||0,
+    players:draft.players.map(p=>({
+      id:p.id||p.name,
+      name:p.name,
+      wins:Number(p.wins||0),
+      losses:Number(p.losses||0),
+      team:p.team||"",
+      moneyNet:Number(p.moneyNet||0)
+    })),
+    teams:draft.teams||{A:[],B:[]},
+    matches:draft.matches.map(m=>({
+      round:m.round||1,
+      teamMode:!!m.teamMode,
+      playerA:m.playerA||"",
+      playerB:m.playerB||"",
+      winner:m.winner||""
+    })),
+    sideWagers:Array.isArray(draft.sideWagers)?draft.sideWagers:[],
+    settlementLines:Array.isArray(draft.settlementLines)?draft.settlementLines:[]
+  };
+}
+
+function importHistoryText(){
+  const text=document.getElementById("importText").value.trim();
+  if(!text){
+    warn("historyNotice","Paste export text first.");
+    return;
+  }
+
+  let payload;
+  try{
+    payload=JSON.parse(text);
+  }catch(e){
+    warn("historyNotice","Import failed: this is not valid JSON.");
+    return;
+  }
+
+  let importedDrafts=[];
+  if(payload.exportType==="singleDraft"&&payload.draft){
+    const normalized=normalizeImportedDraft(payload.draft);
+    if(normalized)importedDrafts.push(normalized);
+  }else if(payload.exportType==="cubeDraftHistoryBackup"&&Array.isArray(payload.drafts)){
+    importedDrafts=payload.drafts.map(normalizeImportedDraft).filter(Boolean);
+  }else if(payload.draftId){
+    const normalized=normalizeImportedDraft(payload);
+    if(normalized)importedDrafts.push(normalized);
+  }
+
+  if(!importedDrafts.length){
+    warn("historyNotice","No valid drafts found in import.");
+    return;
+  }
+
+  let added=0,updated=0;
+  importedDrafts.forEach(draft=>{
+    const index=draftHistory.findIndex(d=>d.draftId===draft.draftId);
+    if(index>=0){
+      draftHistory[index]=draft;
+      updated++;
+    }else{
+      draftHistory.push(draft);
+      added++;
+    }
+  });
+
+  saveDraftHistory();
+  renderHistoryAndStats();
+  document.getElementById("importText").value="";
+  document.getElementById("importArea").style.display="none";
+  success("historyNotice",`Imported ${added} new draft(s), updated ${updated}.`);
+}
+
+function deleteDraftFromHistory(draftId){
+  if(!confirm("Delete this draft from local history?"))return;
+  draftHistory=draftHistory.filter(d=>d.draftId!==draftId);
+  saveDraftHistory();
+  renderHistoryAndStats();
+  success("historyNotice","Draft deleted.");
+}
+
+function clearDraftHistory(){
+  if(!confirm("Delete all local draft history from this device?"))return;
+  draftHistory=[];
+  saveDraftHistory();
+  renderHistoryAndStats();
+  success("historyNotice","History cleared.");
+}
+
+function formatDateShort(iso){
+  try{
+    return new Date(iso).toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"});
+  }catch(e){
+    return iso||"Unknown date";
+  }
+}
+
+function computeBasicStats(){
+  const stats={};
+
+  draftHistory.forEach(draft=>{
+    draft.players.forEach(p=>{
+      if(!stats[p.name]){
+        stats[p.name]={name:p.name,drafts:0,wins:0,losses:0,moneyNet:0};
+      }
+      stats[p.name].drafts++;
+      stats[p.name].wins+=Number(p.wins||0);
+      stats[p.name].losses+=Number(p.losses||0);
+      stats[p.name].moneyNet+=Number(p.moneyNet||0);
+    });
+  });
+
+  return Object.values(stats).sort((a,b)=>{
+    const totalA=a.wins+a.losses;
+    const totalB=b.wins+b.losses;
+    const wrA=totalA?a.wins/totalA:0;
+    const wrB=totalB?b.wins/totalB:0;
+    if(wrB!==wrA)return wrB-wrA;
+    if(b.moneyNet!==a.moneyNet)return b.moneyNet-a.moneyNet;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+function renderStatsSummary(){
+  const container=document.getElementById("statsSummary");
+  if(!container)return;
+
+  if(!draftHistory.length){
+    container.innerHTML='<p class="small">No saved drafts yet.</p>';
+    return;
+  }
+
+  const stats=computeBasicStats();
+  const totalDrafts=draftHistory.length;
+
+  let html=`<div class="small"><strong>Drafts recorded:</strong> ${totalDrafts}</div><div class="statsGrid">`;
+
+  stats.forEach(s=>{
+    const matches=s.wins+s.losses;
+    const winPct=matches?((s.wins/matches)*100).toFixed(1):"0.0";
+    const sign=s.moneyNet>0?"+":"";
+    const moneyClass=s.moneyNet>=0?"positive":"negative";
+
+    html+=`
+      <div class="statCard">
+        <div class="statName">${s.name}</div>
+        <div class="statLine"><span>Drafts</span><strong>${s.drafts}</strong></div>
+        <div class="statLine"><span>Match record</span><strong>${s.wins}-${s.losses}</strong></div>
+        <div class="statLine"><span>Win %</span><strong>${winPct}%</strong></div>
+        <div class="statLine"><span>Money net</span><strong class="${moneyClass}">${sign}${s.moneyNet} CZK</strong></div>
+      </div>
+    `;
+  });
+
+  html+="</div>";
+  container.innerHTML=html;
+}
+
+function renderDraftHistoryList(){
+  const container=document.getElementById("draftHistoryList");
+  if(!container)return;
+
+  if(!draftHistory.length){
+    container.innerHTML='<p class="small">No drafts saved yet.</p>';
+    return;
+  }
+
+  const sorted=[...draftHistory].sort((a,b)=>new Date(b.date)-new Date(a.date));
+  container.innerHTML="";
+
+  sorted.forEach(draft=>{
+    const playersText=draft.players.map(p=>`${p.name} ${p.wins}-${p.losses} (${p.moneyNet>=0?"+":""}${p.moneyNet})`).join(", ");
+    const div=document.createElement("div");
+    div.className="historyDraft";
+    div.innerHTML=`
+      <div class="historyHeader">
+        <span>${formatDateShort(draft.date)} · ${draft.format==="team"?"Team draft":"Free-for-all"} · ${draft.players.length} players</span>
+        <span class="small">${draft.draftId.slice(-6)}</span>
+      </div>
+      <div class="small" style="margin-top:6px;">${playersText}</div>
+      <div class="historyActions">
+        <button class="secondary miniBtn" onclick="exportSingleDraft('${draft.draftId}')">Export draft</button>
+        <button class="danger miniBtn" onclick="deleteDraftFromHistory('${draft.draftId}')">Delete</button>
+      </div>
+    `;
+    container.appendChild(div);
+  });
+}
+
+function renderHistoryAndStats(){
+  renderStatsSummary();
+  renderDraftHistoryList();
+}
+
+
 function copyText(text,targetId){
   if(navigator.clipboard&&window.isSecureContext){
     navigator.clipboard.writeText(text);
@@ -1285,6 +1694,7 @@ function resetAll(){
   rounds=[];
   currentRound=0;
   sideWagers=[];
+  currentDraftSaved=false;
 
   ["seatingCard","roundCard","standingsCard","wagerCard"].forEach(id=>document.getElementById(id).style.display="none");
   ["playerWarning","roundNotice","seatingList","teamDisplay","noPlayDisplay","seatingCopy","settlementCopy"].forEach(id=>{
@@ -1305,8 +1715,10 @@ function success(id,message){
 }
 
 loadRegulars();
+loadDraftHistory();
 renderSetup();
 setDraftMode(draftSize===6?"team":"ffa");
+renderHistoryAndStats();
 </script>
 </body>
 </html>
