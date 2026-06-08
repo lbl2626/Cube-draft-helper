@@ -218,10 +218,46 @@
   margin-bottom:8px;
 }
 
+
+.manualTeamList{
+  margin-top:10px;
+}
+.manualTeamRow{
+  display:grid;
+  grid-template-columns:1fr auto auto;
+  gap:6px;
+  align-items:center;
+  border-top:1px solid var(--border);
+  padding:8px 0;
+}
+.manualTeamRow:first-child{border-top:none}
+.manualTeamBtn{
+  background:var(--soft);
+  color:var(--text);
+  border:1px solid var(--border);
+  padding:8px 10px;
+  font-size:14px;
+}
+.manualTeamBtn.active{
+  background:var(--primary);
+  color:white;
+}
+.teamCount{
+  color:var(--muted);
+  font-size:13px;
+  font-weight:800;
+  margin-left:6px;
+}
+@media(max-width:560px){
+  .manualTeamRow{
+    grid-template-columns:1fr;
+  }
+}
+
 </style>
 </head>
 <body>
-  <h1>Cube Draft Helper <span class="appVersion">v16.3</span></h1>
+  <h1>Cube Draft Helper <span class="appVersion">v16.4</span></h1>
   <p class="sub">Select players, generate seating, run free-for-all Swiss or team draft matches, and track settlements.</p>
 
   <div id="postDraftReveal" class="postDraftReveal" style="display:none;">
@@ -370,7 +406,7 @@
 
 
 <script>
-const DEFAULT_REGULARS=["Bertík","Flochy","René","Zubař","KK","Batrs","Stráča","Slávek","Vít Vávra","Vítek Říman","Buky"];
+const DEFAULT_REGULARS=["Bertík","Flochy","René","Zubař","KK","Batrs","Stráča","Slávek","Vít Vávra","Vítek Říman","Buky","Eliáš"];
 
 let draftSize=8;
 let draftMode="ffa";
@@ -380,6 +416,7 @@ let guests=[];
 let players=[];
 let seating=[];
 let teams={A:[],B:[]};
+let teamAssignmentMode="auto";
 let teamNoPlayPairs=[];
 let rounds=[];
 let currentRound=0;
@@ -387,6 +424,65 @@ let sideWagers=[];
 let wagerMode="1v1";
 let draftHistory=[];
 let currentDraftSaved=false;
+
+
+function normalizePlayerName(name){
+  const raw=(name||"").trim();
+  const lower=raw.toLowerCase();
+
+  if(lower==="hebkoň"||lower==="hebkon"||lower==="hebekon"||lower==="elias"||lower==="eliáš"){
+    return "Eliáš";
+  }
+
+  if(raw==="Vítek"){
+    return "Vítek Říman";
+  }
+
+  return raw;
+}
+
+function uniqueNamesPreserveOrder(names){
+  const seen=new Set();
+  const result=[];
+  names.forEach(name=>{
+    const normalized=normalizePlayerName(name);
+    const key=normalized.toLowerCase();
+    if(!seen.has(key)){
+      seen.add(key);
+      result.push(normalized);
+    }
+  });
+  return result;
+}
+
+function migrateDraftNames(draft){
+  try{
+    let json=JSON.stringify(draft);
+    json=json
+      .replaceAll("Hebkoň","Eliáš")
+      .replaceAll("Hebkon","Eliáš")
+      .replaceAll("Hebekon","Eliáš")
+      .replaceAll("Elias","Eliáš");
+    const migrated=JSON.parse(json);
+
+    if(Array.isArray(migrated.players)){
+      migrated.players=migrated.players.map(p=>({
+        ...p,
+        name:normalizePlayerName(p.name)
+      }));
+    }
+
+    if(migrated.teams){
+      if(Array.isArray(migrated.teams.A))migrated.teams.A=migrated.teams.A.map(normalizePlayerName);
+      if(Array.isArray(migrated.teams.B))migrated.teams.B=migrated.teams.B.map(normalizePlayerName);
+    }
+
+    return migrated;
+  }catch(e){
+    return draft;
+  }
+}
+
 
 function loadRegulars(){
   const saved=localStorage.getItem("cubeDraftRegulars");
@@ -400,7 +496,8 @@ function loadRegulars(){
   }catch(e){
     regulars=[...DEFAULT_REGULARS];
   }
-  regulars=regulars.map(n=>n==="Vítek"?"Vítek Říman":n);
+
+  regulars=uniqueNamesPreserveOrder([...regulars,...DEFAULT_REGULARS]);
   localStorage.setItem("cubeDraftRegulars",JSON.stringify(regulars));
 }
 
@@ -521,6 +618,7 @@ function startDraft(){
   players=names.map((name,index)=>({id:"p"+index,name,wins:0,losses:0,opponents:[]}));
   seating=[];
   teams={A:[],B:[]};
+  teamAssignmentMode="auto";
   teamNoPlayPairs=[];
   rounds=[];
   currentRound=0;
@@ -550,6 +648,7 @@ function startDraft(){
 function generateSeating(){
   if(!players.length){warn("seatingCopy","Start draft first.");return;}
   seating=shuffle(players);
+  teamAssignmentMode="auto";
   assignTeamsFromSeating();
 
   const list=document.getElementById("seatingList");
@@ -576,15 +675,115 @@ function assignTeamsFromSeating(){
   });
 }
 
+
+function setTeamAssignmentMode(mode){
+  teamAssignmentMode=mode;
+  if(mode==="auto"){
+    assignTeamsFromSeating();
+  }
+  renderTeams();
+  renderNoPlayPairs();
+  updateRoundButtonState();
+  updateSettlementPreview();
+}
+
+function playerTeamId(playerId){
+  if(teams.A.includes(playerId))return "A";
+  if(teams.B.includes(playerId))return "B";
+  return "";
+}
+
+function setPlayerTeam(playerId,team){
+  teams.A=teams.A.filter(id=>id!==playerId);
+  teams.B=teams.B.filter(id=>id!==playerId);
+
+  if(team==="A")teams.A.push(playerId);
+  if(team==="B")teams.B.push(playerId);
+
+  teamAssignmentMode="manual";
+  renderTeams();
+  renderNoPlayPairs();
+  updateRoundButtonState();
+  updateSettlementPreview();
+}
+
+function teamsAreValid(){
+  if(draftMode!=="team")return true;
+  if(!players.length)return false;
+
+  const expected=players.length/2;
+  const all=[...teams.A,...teams.B];
+  const unique=new Set(all);
+
+  return teams.A.length===expected&&teams.B.length===expected&&unique.size===players.length;
+}
+
+function teamValidationMessage(){
+  if(draftMode!=="team")return "";
+  const expected=players.length/2;
+  if(!seating.length)return "Generate seating first.";
+  if(!teamsAreValid()){
+    return `Teams must be ${expected}-${expected}. Current: Team A ${teams.A.length}, Team B ${teams.B.length}.`;
+  }
+  return "";
+}
+
+
 function renderTeams(){
   const el=document.getElementById("teamDisplay");
   if(!el)return;
-  if(draftMode!=="team"){el.innerHTML="";return;}
-  if(!seating.length){el.innerHTML='<div class="warning">Generate seating to create alternating teams.</div>';return;}
+
+  if(draftMode!=="team"){
+    el.innerHTML="";
+    return;
+  }
+
+  if(!seating.length){
+    el.innerHTML='<div class="warning">Generate seating to create teams.</div>';
+    return;
+  }
 
   const teamA=teams.A.map(id=>players.find(p=>p.id===id)?.name).filter(Boolean);
   const teamB=teams.B.map(id=>players.find(p=>p.id===id)?.name).filter(Boolean);
-  el.innerHTML=`<h3>Teams</h3><div class="teamGrid"><div class="teamBox"><div class="teamName">Team A</div>${teamA.map(n=>`<div>${n}</div>`).join("")}</div><div class="teamBox"><div class="teamName">Team B</div>${teamB.map(n=>`<div>${n}</div>`).join("")}</div></div>`;
+  const expected=players.length/2;
+  const warning=teamValidationMessage();
+
+  const manualRows=seating.map(p=>{
+    const current=playerTeamId(p.id);
+    return `
+      <div class="manualTeamRow">
+        <strong>${p.name}</strong>
+        <button class="manualTeamBtn ${current==="A"?"active":""}" onclick="setPlayerTeam('${p.id}','A')">Team A</button>
+        <button class="manualTeamBtn ${current==="B"?"active":""}" onclick="setPlayerTeam('${p.id}','B')">Team B</button>
+      </div>
+    `;
+  }).join("");
+
+  el.innerHTML=`
+    <h3>Teams</h3>
+    <div class="sizeToggle">
+      <button id="teamAssignAuto" class="sizeBtn ${teamAssignmentMode==="auto"?"active":""}" onclick="setTeamAssignmentMode('auto')">Auto from seating</button>
+      <button id="teamAssignManual" class="sizeBtn ${teamAssignmentMode==="manual"?"active":""}" onclick="setTeamAssignmentMode('manual')">Manual teams</button>
+    </div>
+
+    <div class="teamGrid">
+      <div class="teamBox">
+        <div class="teamName">Team A <span class="teamCount">${teamA.length}/${expected}</span></div>
+        ${teamA.map(n=>`<div>${n}</div>`).join("")||'<div class="small">No players</div>'}
+      </div>
+      <div class="teamBox">
+        <div class="teamName">Team B <span class="teamCount">${teamB.length}/${expected}</span></div>
+        ${teamB.map(n=>`<div>${n}</div>`).join("")||'<div class="small">No players</div>'}
+      </div>
+    </div>
+
+    ${warning?`<div class="warning">${warning}</div>`:""}
+
+    <details ${teamAssignmentMode==="manual"?"open":""}>
+      <summary>Manual team selection</summary>
+      <div class="manualTeamList">${manualRows}</div>
+    </details>
+  `;
 }
 
 function generateTeamDraftPairings(){
@@ -692,6 +891,7 @@ function updateRoundButtonState(){
     button.disabled=false;
     if(!players.length){button.textContent="Generate Team Matches";button.className="";return;}
     if(!seating.length){button.textContent="Generate seating first";button.className="secondary";return;}
+    if(!teamsAreValid()){button.textContent="Fix teams first";button.className="secondary";return;}
     if(!rounds.length||!rounds[0].teamMode){button.textContent="Generate Team Matches";button.className="";return;}
     if(allResultsEntered()){button.textContent="Finish Team Draft";button.className="good";return;}
     button.textContent="Finish When Ready";
@@ -708,6 +908,7 @@ function updateRoundButtonState(){
 function generateNextRound(){
   if(draftMode==="team"){
     if(!seating.length){alert("Generate seating first so teams can be created.");return;}
+    if(!teamsAreValid()){alert(teamValidationMessage());return;}
 
     if(!rounds.length||!rounds[0].teamMode){
       const pairings=generateTeamDraftPairings();
@@ -1333,6 +1534,9 @@ function loadDraftHistory(){
   }catch(e){
     draftHistory=[];
   }
+
+  draftHistory=draftHistory.map(migrateDraftNames);
+  localStorage.setItem("cubeDraftHistory",JSON.stringify(draftHistory));
 }
 
 function saveDraftHistory(){
@@ -1459,7 +1663,8 @@ function makeDraftExport(){
       payout21:moneyValue("payout21"),
       payout12:moneyValue("payout12"),
       payout03:moneyValue("payout03"),
-      teamWager:moneyValue("teamWager")
+      teamWager:moneyValue("teamWager"),
+      teamAssignmentMode
     },
     players:players.map(p=>({
       id:p.id,
@@ -1617,7 +1822,7 @@ function normalizeImportedDraft(draft){
       const totalNet=Number(p.money?.totalNet ?? p.moneyNet ?? 0);
       return {
         id:p.id||p.name,
-        name:p.name,
+        name:normalizePlayerName(p.name),
         wins:Number(p.wins||0),
         losses:Number(p.losses||0),
         team:p.team||"",
@@ -1635,10 +1840,10 @@ function normalizeImportedDraft(draft){
     matches:draft.matches.map(m=>({
       round:m.round||1,
       teamMode:!!m.teamMode,
-      playerA:m.playerA||"",
-      playerB:m.playerB||"",
-      winner:m.winner||"",
-      loser:m.loser||"",
+      playerA:normalizePlayerName(m.playerA)||"",
+      playerB:normalizePlayerName(m.playerB)||"",
+      winner:normalizePlayerName(m.winner)||"",
+      loser:normalizePlayerName(m.loser)||"",
       playerATeam:m.playerATeam||"",
       playerBTeam:m.playerBTeam||""
     })),
@@ -1916,6 +2121,7 @@ function resetAll(){
   players=[];
   seating=[];
   teams={A:[],B:[]};
+  teamAssignmentMode="auto";
   teamNoPlayPairs=[];
   rounds=[];
   currentRound=0;
