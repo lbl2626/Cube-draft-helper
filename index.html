@@ -254,10 +254,28 @@
   }
 }
 
+
+.importPreviewBox{
+  border:1px solid var(--border);
+  background:#f9fafb;
+  border-radius:12px;
+  padding:10px;
+  margin:10px 0;
+}
+.importPreviewDraft{
+  border-top:1px solid var(--border);
+  padding:8px 0;
+}
+.importPreviewDraft:first-child{border-top:none}
+.importPreviewTitle{
+  font-weight:900;
+  margin-bottom:4px;
+}
+
 </style>
 </head>
 <body>
-  <h1>Cube Draft Helper <span class="appVersion">v16.4</span></h1>
+  <h1>Cube Draft Helper <span class="appVersion">v16.5</span></h1>
   <p class="sub">Select players, generate seating, run free-for-all Swiss or team draft matches, and track settlements.</p>
 
   <div id="postDraftReveal" class="postDraftReveal" style="display:none;">
@@ -390,9 +408,10 @@
       <p class="small">Paste an exported single draft or full backup here.</p>
       <textarea id="importText" class="importBox" placeholder="Paste export here"></textarea>
       <div class="actions">
-        <button onclick="importHistoryText()" class="good">Import</button>
+        <button onclick="importHistoryText()" class="good">Preview import</button>
         <button onclick="toggleImportBox()" class="secondary">Cancel</button>
       </div>
+      <div id="importPreview"></div>
     </div>
 
     <details id="basicStatsDetails">
@@ -406,6 +425,8 @@
 
 
 <script>
+const APP_VERSION="v16.5";
+const CURRENT_SCHEMA_VERSION=2;
 const DEFAULT_REGULARS=["Bertík","Flochy","René","Zubař","KK","Batrs","Stráča","Slávek","Vít Vávra","Vítek Říman","Buky","Eliáš"];
 
 let draftSize=8;
@@ -424,6 +445,7 @@ let sideWagers=[];
 let wagerMode="1v1";
 let draftHistory=[];
 let currentDraftSaved=false;
+let pendingImport=null;
 
 
 function normalizePlayerName(name){
@@ -481,6 +503,256 @@ function migrateDraftNames(draft){
   }catch(e){
     return draft;
   }
+}
+
+
+
+function extractJsonFromImportText(input){
+  const trimmed=(input||"").trim();
+
+  if(trimmed.startsWith("{")){
+    return trimmed;
+  }
+
+  const firstBrace=trimmed.indexOf("{");
+  const lastBrace=trimmed.lastIndexOf("}");
+
+  if(firstBrace===-1||lastBrace===-1||lastBrace<=firstBrace){
+    throw new Error("No valid JSON object found in import text.");
+  }
+
+  return trimmed.slice(firstBrace,lastBrace+1);
+}
+
+function parseImportJson(input){
+  const jsonText=extractJsonFromImportText(input);
+  try{
+    return JSON.parse(jsonText);
+  }catch(e){
+    throw new Error("The import contains JSON, but it is broken or incomplete.");
+  }
+}
+
+function isPlainObject(value){
+  return !!value&&typeof value==="object"&&!Array.isArray(value);
+}
+
+function validateBasicDraftShape(raw){
+  if(!isPlainObject(raw)){
+    throw new Error("Draft is missing or is not an object.");
+  }
+
+  const draft={...raw};
+
+  if(!draft.schemaVersion){
+    draft.schemaVersion=1;
+  }
+
+  if(typeof draft.schemaVersion!=="number"){
+    throw new Error("Draft schemaVersion is missing or invalid.");
+  }
+
+  if(!draft.draftId||typeof draft.draftId!=="string"){
+    throw new Error("Draft is missing draftId.");
+  }
+
+  if(!draft.date||typeof draft.date!=="string"){
+    throw new Error("Draft is missing date.");
+  }
+
+  if(!draft.format||!["ffa","team"].includes(draft.format)){
+    throw new Error("Draft format is missing or unsupported.");
+  }
+
+  if(!Array.isArray(draft.players)||draft.players.length===0){
+    throw new Error("Draft players are missing or invalid.");
+  }
+
+  draft.players.forEach((player,index)=>{
+    if(!isPlainObject(player)||!player.name){
+      throw new Error(`Draft player ${index+1} is missing a name.`);
+    }
+  });
+
+  if(!Array.isArray(draft.matches)){
+    throw new Error("Draft matches are missing or invalid.");
+  }
+
+  draft.matches.forEach((match,index)=>{
+    if(!isPlainObject(match)||!match.playerA||!match.playerB){
+      throw new Error(`Draft match ${index+1} is missing players.`);
+    }
+  });
+
+  if(draft.settings!==undefined&&!isPlainObject(draft.settings)){
+    throw new Error("Draft settings have invalid shape.");
+  }
+
+  if(draft.sideWagers!==undefined&&!Array.isArray(draft.sideWagers)){
+    throw new Error("Draft side wagers have invalid shape.");
+  }
+
+  return draft;
+}
+
+function migrateV1ToV2(rawDraft){
+  const draft=validateBasicDraftShape(rawDraft);
+
+  return {
+    ...draft,
+    schemaVersion:CURRENT_SCHEMA_VERSION,
+    settings:{
+      entryFee:Number(draft.settings?.entryFee ?? 1000),
+      payout30:Number(draft.settings?.payout30 ?? 5000),
+      payout21:Number(draft.settings?.payout21 ?? 1000),
+      payout12:Number(draft.settings?.payout12 ?? 0),
+      payout03:Number(draft.settings?.payout03 ?? 0),
+      teamWager:Number(draft.settings?.teamWager ?? 1000),
+      teamAssignmentMode:draft.settings?.teamAssignmentMode || "auto"
+    },
+    players:draft.players.map(p=>{
+      const totalNet=Number(p.money?.totalNet ?? p.moneyNet ?? 0);
+      return {
+        id:p.id||p.name,
+        name:normalizePlayerName(p.name),
+        wins:Number(p.wins||0),
+        losses:Number(p.losses||0),
+        team:p.team||"",
+        moneyNet:totalNet,
+        money:{
+          prizeNet:Number(p.money?.prizeNet||0),
+          teamNet:Number(p.money?.teamNet||0),
+          sideWagerNet:Number(p.money?.sideWagerNet||0),
+          totalNet
+        }
+      };
+    }),
+    teams:{
+      A:Array.isArray(draft.teams?.A)?draft.teams.A.map(normalizePlayerName):[],
+      B:Array.isArray(draft.teams?.B)?draft.teams.B.map(normalizePlayerName):[]
+    },
+    teamResult:draft.teamResult||null,
+    matches:draft.matches.map(m=>({
+      round:Number(m.round||1),
+      teamMode:!!m.teamMode,
+      playerA:normalizePlayerName(m.playerA||""),
+      playerB:normalizePlayerName(m.playerB||""),
+      winner:normalizePlayerName(m.winner||""),
+      loser:normalizePlayerName(m.loser||""),
+      playerATeam:m.playerATeam||"",
+      playerBTeam:m.playerBTeam||""
+    })),
+    sideWagers:Array.isArray(draft.sideWagers)?draft.sideWagers.map(w=>({
+      playerA:normalizePlayerName(w.playerA||""),
+      playerB:normalizePlayerName(w.playerB||""),
+      amount:Number(w.amount||0),
+      group:w.group||""
+    })):[],
+    sideWagerResults:Array.isArray(draft.sideWagerResults)?draft.sideWagerResults.map(r=>({
+      playerA:normalizePlayerName(r.playerA||""),
+      playerB:normalizePlayerName(r.playerB||""),
+      amount:Number(r.amount||0),
+      winner:normalizePlayerName(r.winner||""),
+      loser:normalizePlayerName(r.loser||""),
+      void:!!r.void,
+      reason:r.reason||"",
+      group:r.group||""
+    })):[],
+    settlementLines:Array.isArray(draft.settlementLines)?draft.settlementLines:[]
+  };
+}
+
+function migrateDraft(raw){
+  const draft=validateBasicDraftShape(raw);
+  const version=draft.schemaVersion ?? 1;
+
+  switch(version){
+    case 1:
+      return migrateV1ToV2(draft);
+    case 2:
+      return migrateV1ToV2(draft);
+    default:
+      throw new Error(`Unsupported draft schema version: ${version}.`);
+  }
+}
+
+function validateDraftExport(parsed){
+  if(!isPlainObject(parsed)){
+    throw new Error("Import is not a valid export object.");
+  }
+
+  // Legacy support for very early exports that were the draft object itself.
+  if(parsed.draftId){
+    return {
+      exportType:"singleDraft",
+      exportedAt:parsed.date||new Date().toISOString(),
+      appVersion:APP_VERSION,
+      schemaVersion:CURRENT_SCHEMA_VERSION,
+      draft:parsed
+    };
+  }
+
+  // Legacy support for previous backup exportType.
+  if(parsed.exportType==="cubeDraftHistoryBackup"){
+    if(!Array.isArray(parsed.drafts)){
+      throw new Error("Backup export is missing drafts.");
+    }
+    return {
+      exportType:"allDrafts",
+      exportedAt:parsed.exportedAt||new Date().toISOString(),
+      appVersion:parsed.appVersion||"",
+      schemaVersion:parsed.schemaVersion||1,
+      drafts:parsed.drafts
+    };
+  }
+
+  if(!["singleDraft","allDrafts"].includes(parsed.exportType)){
+    throw new Error("Unsupported export type.");
+  }
+
+  if(!parsed.schemaVersion){
+    parsed.schemaVersion=1;
+  }
+
+  if(typeof parsed.schemaVersion!=="number"){
+    throw new Error("Export schemaVersion is missing or invalid.");
+  }
+
+  if(parsed.exportType==="singleDraft"){
+    if(!isPlainObject(parsed.draft)){
+      throw new Error("Single draft export is missing draft.");
+    }
+    return parsed;
+  }
+
+  if(parsed.exportType==="allDrafts"){
+    if(!Array.isArray(parsed.drafts)){
+      throw new Error("Backup export is missing drafts.");
+    }
+    return parsed;
+  }
+
+  throw new Error("Unsupported export type.");
+}
+
+function prepareImportFromText(input){
+  const parsed=validateDraftExport(parseImportJson(input));
+  const drafts=parsed.exportType==="singleDraft"
+    ? [migrateDraft(parsed.draft)]
+    : parsed.drafts.map(migrateDraft);
+
+  const duplicateDraftIds=drafts
+    .filter(draft=>draftHistory.some(existing=>existing.draftId===draft.draftId))
+    .map(draft=>draft.draftId);
+
+  return {
+    exportType:parsed.exportType,
+    exportedAt:parsed.exportedAt||"",
+    appVersion:parsed.appVersion||"",
+    schemaVersion:parsed.schemaVersion||1,
+    drafts,
+    duplicateDraftIds
+  };
 }
 
 
@@ -589,6 +861,11 @@ function removeGuest(index){
 }
 
 function clearSelection(){
+  if(selectedRegulars.length||guests.length){
+    const confirmed=window.confirm("Clear selected players and guests?");
+    if(!confirmed)return;
+  }
+
   selectedRegulars=[];
   guests=[];
   document.getElementById("guestName").value="";
@@ -1529,13 +1806,14 @@ function copySettlements(){
 function loadDraftHistory(){
   const saved=localStorage.getItem("cubeDraftHistory");
   try{
-    draftHistory=saved?JSON.parse(saved):[];
-    if(!Array.isArray(draftHistory))draftHistory=[];
+    const raw=saved?JSON.parse(saved):[];
+    draftHistory=Array.isArray(raw)
+      ? raw.map(draft=>migrateDraft(migrateDraftNames(draft))).filter(Boolean)
+      : [];
   }catch(e){
     draftHistory=[];
   }
 
-  draftHistory=draftHistory.map(migrateDraftNames);
   localStorage.setItem("cubeDraftHistory",JSON.stringify(draftHistory));
 }
 
@@ -1652,7 +1930,7 @@ function makeDraftExport(){
   const draftId="draft_"+new Date().toISOString()+"_"+Math.random().toString(36).slice(2,8);
 
   return {
-    schemaVersion:2,
+    schemaVersion:CURRENT_SCHEMA_VERSION,
     draftId,
     date:new Date().toISOString(),
     format:draftMode,
@@ -1750,12 +2028,13 @@ function exportSingleDraft(draftId){
   const payload={
     exportType:"singleDraft",
     exportedAt:new Date().toISOString(),
-    draft
+    appVersion:APP_VERSION,
+    schemaVersion:CURRENT_SCHEMA_VERSION,
+    draft:migrateDraft(draft)
   };
 
   copyText(JSON.stringify(payload,null,2),"historyNotice");
 }
-
 
 function shareSingleDraft(draftId){
   const draft=draftHistory.find(d=>d.draftId===draftId);
@@ -1767,7 +2046,9 @@ function shareSingleDraft(draftId){
   const payload={
     exportType:"singleDraft",
     exportedAt:new Date().toISOString(),
-    draft
+    appVersion:APP_VERSION,
+    schemaVersion:CURRENT_SCHEMA_VERSION,
+    draft:migrateDraft(draft)
   };
 
   const text=JSON.stringify(payload,null,2);
@@ -1791,12 +2072,13 @@ function shareSingleDraft(draftId){
   }
 }
 
-
 function exportAllHistory(){
   const payload={
-    exportType:"cubeDraftHistoryBackup",
+    exportType:"allDrafts",
     exportedAt:new Date().toISOString(),
-    drafts:draftHistory
+    appVersion:APP_VERSION,
+    schemaVersion:CURRENT_SCHEMA_VERSION,
+    drafts:draftHistory.map(migrateDraft)
   };
 
   copyText(JSON.stringify(payload,null,2),"historyNotice");
@@ -1805,75 +2087,19 @@ function exportAllHistory(){
 function toggleImportBox(){
   const area=document.getElementById("importArea");
   if(!area)return;
-  area.style.display=area.style.display==="none"?"block":"none";
-}
 
-function normalizeImportedDraft(draft){
-  if(!draft||!draft.draftId||!Array.isArray(draft.players)||!Array.isArray(draft.matches))return null;
+  const opening=area.style.display==="none";
+  area.style.display=opening?"block":"none";
 
-  return {
-    schemaVersion:draft.schemaVersion||1,
-    draftId:draft.draftId,
-    date:draft.date||new Date().toISOString(),
-    format:draft.format||"ffa",
-    draftSize:draft.draftSize||draft.players.length||0,
-    settings:draft.settings||{},
-    players:draft.players.map(p=>{
-      const totalNet=Number(p.money?.totalNet ?? p.moneyNet ?? 0);
-      return {
-        id:p.id||p.name,
-        name:normalizePlayerName(p.name),
-        wins:Number(p.wins||0),
-        losses:Number(p.losses||0),
-        team:p.team||"",
-        moneyNet:totalNet,
-        money:{
-          prizeNet:Number(p.money?.prizeNet||0),
-          teamNet:Number(p.money?.teamNet||0),
-          sideWagerNet:Number(p.money?.sideWagerNet||0),
-          totalNet
-        }
-      };
-    }),
-    teams:draft.teams||{A:[],B:[]},
-    teamResult:draft.teamResult||null,
-    matches:draft.matches.map(m=>({
-      round:m.round||1,
-      teamMode:!!m.teamMode,
-      playerA:normalizePlayerName(m.playerA)||"",
-      playerB:normalizePlayerName(m.playerB)||"",
-      winner:normalizePlayerName(m.winner)||"",
-      loser:normalizePlayerName(m.loser)||"",
-      playerATeam:m.playerATeam||"",
-      playerBTeam:m.playerBTeam||""
-    })),
-    sideWagers:Array.isArray(draft.sideWagers)?draft.sideWagers:[],
-    sideWagerResults:Array.isArray(draft.sideWagerResults)?draft.sideWagerResults:[],
-    settlementLines:Array.isArray(draft.settlementLines)?draft.settlementLines:[]
-  };
+  if(!opening){
+    cancelImportPreview();
+  }
 }
 
 
 function parsePossiblyWrappedJson(text){
-  const trimmed=text.trim();
-
-  try{
-    return JSON.parse(trimmed);
-  }catch(e){
-    // Continue to wrapped-text extraction.
-  }
-
-  const first=trimmed.indexOf("{");
-  const last=trimmed.lastIndexOf("}");
-
-  if(first===-1||last===-1||last<=first){
-    throw new Error("No JSON object found.");
-  }
-
-  const candidate=trimmed.slice(first,last+1);
-  return JSON.parse(candidate);
+  return parseImportJson(text);
 }
-
 
 function importHistoryText(){
   const text=document.getElementById("importText").value.trim();
@@ -1882,51 +2108,127 @@ function importHistoryText(){
     return;
   }
 
-  let payload;
   try{
-    payload=parsePossiblyWrappedJson(text);
+    pendingImport=prepareImportFromText(text);
+    renderImportPreview();
+    document.getElementById("historyNotice").innerHTML="";
   }catch(e){
-    warn("historyNotice","Import failed: no valid JSON export found in pasted text.");
+    pendingImport=null;
+    document.getElementById("importPreview").innerHTML="";
+    warn("historyNotice",`Import failed: ${e.message}`);
+  }
+}
+
+
+function draftPreviewLine(draft){
+  const date=formatDateShort(draft.date);
+  const format=draft.format==="team"?"Team draft":"Free-for-all";
+  const players=draft.players.map(p=>p.name).join(", ");
+  const settings=draft.settings||{};
+  const entry=settings.entryFee!==undefined?`Entry: ${settings.entryFee} CZK`:"Entry: -";
+  const payout=draft.format==="team"
+    ? `Team wager: ${settings.teamWager ?? "-"} CZK`
+    : `Payouts: 3-0 ${settings.payout30 ?? "-"}, 2-1 ${settings.payout21 ?? "-"} CZK`;
+
+  let winner="-";
+  if(draft.format==="team"&&draft.teamResult){
+    if(draft.teamResult.winner)winner=`Team ${draft.teamResult.winner}`;
+    else winner="Tie / void";
+  }else{
+    const top=[...draft.players].sort((a,b)=>b.wins-a.wins||a.losses-b.losses)[0];
+    if(top)winner=`${top.name} ${top.wins}-${top.losses}`;
+  }
+
+  return `
+    <div class="importPreviewDraft">
+      <div class="importPreviewTitle">${date} · ${format} · ${draft.players.length} players</div>
+      <div class="small"><strong>Players:</strong> ${players}</div>
+      <div class="small"><strong>${entry}</strong> · ${payout}</div>
+      <div class="small"><strong>Winner/result:</strong> ${winner}</div>
+      <div class="small"><strong>Matches:</strong> ${draft.matches.length}</div>
+    </div>
+  `;
+}
+
+function renderImportPreview(){
+  const el=document.getElementById("importPreview");
+  if(!el)return;
+
+  if(!pendingImport){
+    el.innerHTML="";
     return;
   }
 
-  let importedDrafts=[];
-  if(payload.exportType==="singleDraft"&&payload.draft){
-    const normalized=normalizeImportedDraft(payload.draft);
-    if(normalized)importedDrafts.push(normalized);
-  }else if(payload.exportType==="cubeDraftHistoryBackup"&&Array.isArray(payload.drafts)){
-    importedDrafts=payload.drafts.map(normalizeImportedDraft).filter(Boolean);
-  }else if(payload.draftId){
-    const normalized=normalizeImportedDraft(payload);
-    if(normalized)importedDrafts.push(normalized);
+  const isBackup=pendingImport.exportType==="allDrafts";
+  const duplicateCount=pendingImport.duplicateDraftIds.length;
+  const drafts=pendingImport.drafts;
+  const dateRange=drafts.length
+    ? `${formatDateShort(drafts.reduce((min,d)=>new Date(d.date)<new Date(min.date)?d:min,drafts[0]).date)} – ${formatDateShort(drafts.reduce((max,d)=>new Date(d.date)>new Date(max.date)?d:max,drafts[0]).date)}`
+    : "-";
+
+  let html=`
+    <div class="importPreviewBox">
+      <h3>Import preview</h3>
+      <div class="small"><strong>Type:</strong> ${isBackup?"Backup / all drafts":"Single draft"}</div>
+      <div class="small"><strong>Drafts:</strong> ${drafts.length}</div>
+      <div class="small"><strong>Date range:</strong> ${dateRange}</div>
+      <div class="small"><strong>Export schema:</strong> ${pendingImport.schemaVersion}</div>
+      ${drafts.map(draftPreviewLine).join("")}
+  `;
+
+  if(duplicateCount){
+    html+=`<div class="warning">Duplicate draftId found (${duplicateCount}). Import is blocked to protect existing history.</div>`;
+    html+=`<div class="actions"><button onclick="cancelImportPreview()" class="secondary">Cancel</button></div>`;
+  }else{
+    html+=`
+      <div class="actions">
+        <button onclick="confirmImportPreview()" class="good">${isBackup?"Import all drafts":"Import draft"}</button>
+        <button onclick="cancelImportPreview()" class="secondary">Cancel</button>
+      </div>
+    `;
   }
 
-  if(!importedDrafts.length){
-    warn("historyNotice","No valid drafts found in import.");
+  html+="</div>";
+  el.innerHTML=html;
+}
+
+function cancelImportPreview(){
+  pendingImport=null;
+  const preview=document.getElementById("importPreview");
+  if(preview)preview.innerHTML="";
+}
+
+function confirmImportPreview(){
+  if(!pendingImport){
+    warn("historyNotice","No import is ready to confirm.");
     return;
   }
 
-  let added=0,updated=0;
-  importedDrafts.forEach(draft=>{
-    const index=draftHistory.findIndex(d=>d.draftId===draft.draftId);
-    if(index>=0){
-      draftHistory[index]=draft;
-      updated++;
-    }else{
-      draftHistory.push(draft);
-      added++;
-    }
-  });
+  if(pendingImport.duplicateDraftIds.length){
+    warn("historyNotice","Import blocked because one or more drafts already exist.");
+    return;
+  }
 
+  const count=pendingImport.drafts.length;
+  if(pendingImport.exportType==="allDrafts"){
+    const confirmed=window.confirm(`Import ${count} draft(s) from backup? Existing data will be kept and new drafts will be added.`);
+    if(!confirmed)return;
+  }
+
+  pendingImport.drafts.forEach(draft=>draftHistory.push(draft));
   saveDraftHistory();
   renderHistoryAndStats();
+
   document.getElementById("importText").value="";
   document.getElementById("importArea").style.display="none";
-  success("historyNotice",`Imported ${added} new draft(s), updated ${updated}.`);
+  success("historyNotice",`Imported ${count} draft(s).`);
+  cancelImportPreview();
 }
 
 function deleteDraftFromHistory(draftId){
-  if(!confirm("Delete this draft from local history?"))return;
+  const confirmed=window.confirm("Delete this draft? This cannot be undone.");
+  if(!confirmed)return;
+
   draftHistory=draftHistory.filter(d=>d.draftId!==draftId);
   saveDraftHistory();
   renderHistoryAndStats();
@@ -1934,7 +2236,9 @@ function deleteDraftFromHistory(draftId){
 }
 
 function clearDraftHistory(){
-  if(!confirm("Delete all local draft history from this device?"))return;
+  const confirmed=window.confirm("Delete all saved drafts? This cannot be undone. Export a backup first if you want to keep them.");
+  if(!confirmed)return;
+
   draftHistory=[];
   saveDraftHistory();
   renderHistoryAndStats();
@@ -2116,8 +2420,15 @@ function scrollToSettlementsSoon(){
 }
 
 function resetAll(){
+  const confirmed=window.confirm("Reset current draft? Current seating, matches, results, guests and side wagers will be cleared. Saved history will not be deleted.");
+  if(!confirmed)return;
+
   setPostDraftResultsMode(false);
-  clearSelection();
+  selectedRegulars=[];
+  guests=[];
+  document.getElementById("guestName").value="";
+  renderSetup();
+
   players=[];
   seating=[];
   teams={A:[],B:[]};
